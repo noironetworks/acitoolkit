@@ -240,7 +240,7 @@ class Subscriber(threading.Thread):
             if self._ws is not None:
                 if not self._ws.connected:
                     logging.warning('Websocket not established on subscription refresh. Re-establishing websocket')
-                    self._open_web_socket('https://' in subscription)
+                    self._open_web_socket('https://' in self._apic.api)
             try:
                 subscription_id = self._subscriptions[subscription]
             except KeyError:
@@ -348,7 +348,7 @@ class Subscriber(threading.Thread):
 
         if self._ws is not None:
             if not self._ws.connected:
-                self._open_web_socket('https://' in url)
+                self._open_web_socket('https://' in self._apic.api)
 
         resp = self._send_subscription(url, only_new=only_new)
         return resp
