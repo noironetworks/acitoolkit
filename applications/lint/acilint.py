@@ -29,12 +29,14 @@ acilint - A static configuration analysis tool for examining ACI Fabric
           configuration for potential problems and unused configuration.
 """
 import sys
-from acitoolkit.acitoolkit import Tenant, AppProfile, Context, EPG, BridgeDomain, Contract
+from acitoolkit.acitoolkit import Tenant, AppProfile, Context, EPG, BridgeDomain
 from acitoolkit.acitoolkit import OutsideL3, OutsideEPG, OutsideNetwork
+from acitoolkit.acitoolkit import Contract, ContractSubject, InputTerminal
+from acitoolkit.acitoolkit import OutputTerminal, Filter, FilterEntry
 from acitoolkit.acitoolkit import Credentials, Session
 from acitoolkit.acifakeapic import FakeSession
 import argparse
-import ipaddr
+import ipaddress
 
 
 class Checker(object):
@@ -43,20 +45,20 @@ class Checker(object):
     provided configuration.
     """
     def __init__(self, session, output, fh=None):
-        print 'Getting configuration from APIC....'
+        print('Getting configuration from APIC....')
         self.tenants = Tenant.get_deep(session)
         self.output = output
         self.file = fh
-        print 'Processing configuration....'
+        print('Processing configuration....')
 
     def output_handler(self, msg):
         """
-        Print the supplied string in a format appropriate to the output medium.
+        Print(the supplied string in a format appropriate to the output medium.)
 
         :param msg: The message to be printed.
         """
         if self.output == 'console':
-            print msg
+            print(msg)
         elif self.output == 'html':
 
             color_map = {'Error': '#FF8C00',
@@ -231,6 +233,10 @@ class Checker(object):
                                 provide_db[tenant.name][contract.name].append(context.name)
 
         for tenant in self.tenants:
+            if tenant.name not in provide_db:
+                self.output_handler("Warning 010: No contract provided within"
+                                    " this tenant '%s'" % tenant.name)
+                continue  # don't repeat this message for each option below.
             epgs = []
             for app in tenant.get_children(AppProfile):
                 for epg in app.get_children(EPG):
@@ -242,17 +248,151 @@ class Checker(object):
                         context = bd.get_context()
                     consumed = epg.get_all_consumed()
                     for contract in consumed:
-                        if tenant.name not in provide_db:
-                            self.output_handler("Warning 010: No contract provided within"
-                                                " this tenant '%s'" % tenant.name)
-                        elif contract.name not in provide_db[tenant.name]:
-                            self.output_handler("Warning 010: Contract not provided "
+                        if contract.name not in provide_db[tenant.name]:
+                            self.output_handler("Warning 010: Contract '%s' not provided "
                                                 "within the same tenant "
-                                                "'%s'" % tenant.name)
+                                                "'%s'" % (contract.name, tenant.name))
                         elif context.name not in provide_db[tenant.name][contract.name]:
                             self.output_handler("Warning 010: Contract '%s' not provided in context '%s' "
                                                 "where it is being consumed for"
                                                 " tenant '%s'" % (contract.name, context.name, tenant.name))
+
+    @staticmethod
+    def subj_matches_proto(filterlist, protocol):
+        """
+        This routine will return True/False if the list of filters has a filter
+        that matches the specified protocol.
+
+        :param filterlist: The list of filters to inspect.
+        :param protocol: The protocol we are looking for.
+        """
+        for subjfilter in filterlist:
+            for entry in subjfilter.get_children(FilterEntry):
+                entryAttrs = entry.get_attributes()
+                if entryAttrs['prot'] == protocol:
+                    return True
+        return False
+
+    def warning_011(self):
+        """
+        W011: Contract has Bidirectional TCP Subjects.
+        """
+        for tenant in self.tenants:
+            for contract in tenant.get_children(Contract):
+                is_tcp_bidi = 0
+                for subject in contract.get_children(ContractSubject):
+                    if self.subj_matches_proto(subject.get_filters(), 'tcp'):
+                        is_tcp_bidi = 3
+                        break
+
+                    in_terminal = subject.get_children(InputTerminal)
+                    out_terminal = subject.get_children(OutputTerminal)
+                    if in_terminal:
+                        in_filterlist = in_terminal[0].get_filters()
+                    else:
+                        in_filterlist = ()
+                    if out_terminal:
+                        out_filterlist = out_terminal[0].get_filters()
+                    else:
+                        out_filterlist = ()
+
+                    if in_filterlist:
+                        if self.subj_matches_proto(in_filterlist, 'tcp'):
+                            is_tcp_bidi = 1
+                    if out_filterlist:
+                        if self.subj_matches_proto(out_filterlist, 'tcp'):
+                            is_tcp_bidi += 1
+                    # Otherwise, either there are no terminals so it's a permit
+                    # everything which doesn't count.
+
+                    if is_tcp_bidi:
+                        break
+
+                if is_tcp_bidi == 3:
+                    self.output_handler("Warning 011: In tenant '%s' contract "
+                                        "'%s' is a Bidirectional TCP contract."
+                                        % (tenant.name, contract.name))
+                elif is_tcp_bidi == 2:
+                    self.output_handler("Warning 011: In tenant '%s' contract "
+                                        "'%s' is an explictly "
+                                        "Bidirectional TCP contract."
+                                        % (tenant.name, contract.name))
+
+    def warning_012(self):
+        """
+        W012: Contract has Bidirectional UDP Subjects.
+        """
+        for tenant in self.tenants:
+            for contract in tenant.get_children(Contract):
+                is_udp_bidi = 0
+                for subject in contract.get_children(ContractSubject):
+                    if self.subj_matches_proto(subject.get_filters(), 'udp'):
+                        is_udp_bidi = 3
+                        break
+
+                    in_terminal = subject.get_children(InputTerminal)
+                    out_terminal = subject.get_children(OutputTerminal)
+                    if in_terminal:
+                        in_filterlist = in_terminal[0].get_filters()
+                    else:
+                        in_filterlist = ()
+                    if out_terminal:
+                        out_filterlist = out_terminal[0].get_filters()
+                    else:
+                        out_filterlist = ()
+
+                    if in_filterlist:
+                        if self.subj_matches_proto(in_filterlist, 'udp'):
+                            is_udp_bidi = 1
+                    if out_filterlist:
+                        if self.subj_matches_proto(out_filterlist, 'udp'):
+                            is_udp_bidi += 1
+                    # Otherwise, either there are no terminals so it's a permit
+                    # everything which doesn't count.
+
+                    if is_udp_bidi:
+                        break
+
+                if is_udp_bidi == 3:
+                    self.output_handler("Warning 012: In tenant '%s' contract "
+                                        "'%s' is a Bidirectional UDP contract."
+                                        % (tenant.name, contract.name))
+                elif is_udp_bidi == 2:
+                    self.output_handler("Warning 012: In tenant '%s' contract "
+                                        "'%s' is an explictly "
+                                        "Bidirectional UDP contract."
+                                        % (tenant.name, contract.name))
+
+    def warning_013(self):
+        """
+        W013: Contract has no Subjects.
+        """
+        for tenant in self.tenants:
+            for contract in tenant.get_children(Contract):
+                if len(contract.get_children(ContractSubject)) == 0:
+                    self.output_handler("Warning 013: In tenant '%s' contract "
+                                        "'%s' has no Subjects."
+                                        % (tenant.name, contract.name))
+
+    def warning_014(self):
+        """
+        W014: Contract has Subjects with no Filters.
+        """
+        for tenant in self.tenants:
+            for contract in tenant.get_children(Contract):
+                missing_filter = False
+                for subject in contract.get_children(ContractSubject):
+                    if len(subject.get_filters()) == 0:
+                        # No directly attached filters...
+                        for terminal in subject.get_children(InputTerminal):
+                            if len(terminal.get_filters()) == 0:
+                                for out_terminal in subject.get_children(OutputTerminal):
+                                    if len(out_terminal.get_filters()) == 0:
+                                        missing_filter = True
+                    if missing_filter:
+                        self.output_handler("Warning 014: In tenant '%s' contract "
+                                        "'%s' subject '%s' has no Filters." % (
+                                        tenant.name, contract.name, subject.name))
 
     def error_001(self):
         """
@@ -283,7 +423,8 @@ class Checker(object):
 
     def error_005(self):
         """
-        E005: Overlapping subnets are defined in a single context. Note: Only subnets inside the fabric are inspected.
+        E005: Overlapping subnets are defined in a single context.
+        Note: Only subnets inside the fabric are inspected.
         """
         for tenant in self.tenants:
             context_info = {}
@@ -293,9 +434,11 @@ class Checker(object):
                     # BridgeDomain has no Context so ignore it.
                     continue
                 if current_context not in context_info:
-                    context_info[current_context] = {'v4list': [], 'v6list': []}
+                    context_info[current_context] = {'v4list': [],
+                                                     'v6list': []}
                 for subnet in bd.get_subnets():
-                    ip_subnet = ipaddr.IPNetwork(subnet.addr)
+                    ip_subnet = ipaddress.ip_network(unicode(subnet.addr),
+                                                     strict=False)
                     index = 0
                     index_to_insert = 0
                     if ip_subnet.version == 4:
@@ -308,52 +451,62 @@ class Checker(object):
                             index_to_insert = index
                             if bd.name != address_list[index]['bd']:
                                 # Because sometimes they are equal...
-                                self.output_handler("Error 005: In tenant/context '%s/%s': subnet %s in BridgeDomain "
-                                                    "'%s' duplicated by subnet %s in BridgeDomain '%s'" % (
-                                                        tenant.name,
-                                                        current_context,
-                                                        ip_subnet.with_prefixlen,
-                                                        bd.name,
-                                                        address_list[index]['addr'].with_prefixlen,
-                                                        address_list[index]['bd']))
-                        elif ip_subnet < address_list[index]['addr']:
-                            index_to_insert = index+1
-                            if ip_subnet.Contains(address_list[index]['addr']):
                                 self.output_handler(
-                                    "Error 005: In tenant/context '%s/%s': subnet %s in BridgeDomain '%s' "
-                                    "contains subnet %s in BridgeDomain '%s'" % (tenant.name,
-                                                                                 current_context,
-                                                                                 ip_subnet.with_prefixlen,
-                                                                                 bd.name,
-                                                                                 address_list[index - 1][
-                                                                                     'addr'].with_prefixlen,
-                                                                                 address_list[index - 1]['bd'],
-                                                                                 ))
+                                    "Error 005: In tenant/context '{}/{}': "
+                                    "subnet {} in BridgeDomain '{}' "
+                                    "duplicated by subnet {} in BridgeDomain "
+                                    "'{}'".format(tenant.name,
+                                                  current_context,
+                                                  ip_subnet.with_prefixlen,
+                                                  bd.name,
+                                                  address_list[index][
+                                                      'addr'].with_prefixlen,
+                                                  address_list[index]['bd']))
+                        elif ip_subnet < address_list[index]['addr']:
+                            index_to_insert = index + 1
+                            if ip_subnet.overlaps(address_list[index]['addr']):
+                                self.output_handler(
+                                    "Error 005: In tenant/context '{}/{}': "
+                                    "subnet {} in BridgeDomain '{}' "
+                                    "contains subnet {} in BridgeDomain "
+                                    "'{}'".format(tenant.name,
+                                                  current_context,
+                                                  ip_subnet.with_prefixlen,
+                                                  bd.name,
+                                                  address_list[index - 1][
+                                                      'addr'].with_prefixlen,
+                                                  address_list[index - 1]['bd']))
                             else:
                                 break
-                        elif address_list[index]['addr'].Contains(ip_subnet):
+                        elif address_list[index]['addr'].overlaps(ip_subnet):
                             index_to_insert = index
-                            self.output_handler(
-                                "Error 005: In tenant/context '%s/%s': subnet %s in BridgeDomain '%s' "
-                                "contains subnet %s in BridgeDomain '%s'" % (tenant.name,
-                                                                             current_context,
-                                                                             address_list[index]['addr'].with_prefixlen,
-                                                                             address_list[index]['bd'],
-                                                                             ip_subnet.with_prefixlen,
-                                                                             bd.name))
+                            self.output_handler("Error 005: In tenant/context "
+                                                "'{}/{}': subnet {} in "
+                                                "BridgeDomain '{}' contains "
+                                                "subnet {} in BridgeDomain "
+                                                "'{}'".format(tenant.name,
+                                                              current_context,
+                                                              address_list[index][
+                                                                  'addr'].with_prefixlen,
+                                                              address_list[index]['bd'],
+                                                              ip_subnet.with_prefixlen,
+                                                              bd.name))
                             break
                         index += 1
                     if index_to_insert:
-                        address_list.insert(index_to_insert, {'addr': ip_subnet, 'bd': bd.name})
+                        address_list.insert(index_to_insert, {'addr': ip_subnet,
+                                                              'bd': bd.name})
                     else:
-                        address_list.insert(index, {'addr': ip_subnet, 'bd': bd.name})
+                        address_list.insert(index, {'addr': ip_subnet,
+                                                    'bd': bd.name})
 
     def error_006(self):
         """
         E006: Check for duplicated subnets in ExternalNetworks.
 
-        Check to ensure that the same subnet is not defined in two separate ExternalNetworks or between an
-        ExternalNetwork and a BD within a single VRF. Overlapping but not the equal subnets are not a problem.
+        Check to ensure that the same subnet is not defined in two separate
+        ExternalNetworks or between an ExternalNetwork and a BD within a
+        single VRF. Overlapping but not the equal subnets are not a problem.
         """
         for tenant in self.tenants:
             context_set = {}
@@ -369,17 +522,25 @@ class Checker(object):
                 for extnet in l3out.get_children(OutsideEPG):
                     for subnet in extnet.get_children(OutsideNetwork):
                         if subnet.addr in current_subnets:
-                            current_subnets[subnet.addr].append("%s/%s/%s/%s" % (tenant.name, current_ctxt.name,
-                                                                                 l3out.name, extnet.name))
+                            current_subnets[subnet.addr].append(
+                                "{}/{}/{}/{}".format(tenant.name,
+                                                     current_ctxt.name,
+                                                     l3out.name,
+                                                     extnet.name))
                         else:
-                            current_subnets[subnet.addr] = ["%s/%s/%s/%s" % (tenant.name, current_ctxt.name,
-                                                                             l3out.name, extnet.name)]
+                            current_subnets[subnet.addr] = [
+                                "{}/{}/{}/{}".format(tenant.name,
+                                                     current_ctxt.name,
+                                                     l3out.name,
+                                                     extnet.name)]
             for current_ctxt in context_set:
                 for subnet in context_set[current_ctxt]:
                     if 1 < len(context_set[current_ctxt][subnet]):
                         for subnet_info in context_set[current_ctxt][subnet]:
-                            self.output_handler("Error 006: In Tenant/Context/L3Out/ExtEPG '%s' found "
-                                                "duplicate subnet %s." % (subnet_info, subnet))
+                            self.output_handler(
+                                "Error 006: In Tenant/Context/L3Out/ExtEPG "
+                                "'{}' found duplicate subnet {}.".format(
+                                    subnet_info, subnet))
 
             for bd in tenant.get_children(BridgeDomain):
                 bd_ctxt = bd.get_context()
@@ -390,14 +551,19 @@ class Checker(object):
                     # BridgeDomain Context has no associated ExternalNetworks so ignore it.
                     continue
                 for subnet in bd.get_subnets():
-                    ip_subnet = ipaddr.IPNetwork(subnet.addr)
-                    ip_subnet_str = "%s/%s" % (ip_subnet.network, ip_subnet.prefixlen)
+                    ip_subnet = ipaddress.ip_network(unicode(subnet.addr),
+                                                     strict=False)
+                    ip_subnet_str = ip_subnet.network_address
                     if ip_subnet_str in context_set[bd_ctxt.name]:
                         for subnet_info in context_set[bd_ctxt.name][ip_subnet_str]:
-                            self.output_handler("Error 006: Subnet %s in Tenant/Context/BridgeDomain "
-                                                "'%s/%s/%s' conflicts with subnet %s in Tenant/Context/L3Out/ExtEPG "
-                                                "'%s'." % (ip_subnet.with_prefixlen, tenant.name, bd_ctxt.name,
-                                                           bd.name, ip_subnet_str, subnet_info))
+                            self.output_handler(
+                                "Error 006: Subnet {0:s} in "
+                                "Tenant/Context/BridgeDomain '{}/{}/{}' "
+                                "conflicts with subnet {} in "
+                                "Tenant/Context/L3Out/ExtEPG '{}'.".format(
+                                    ip_subnet.with_prefixlen, tenant.name,
+                                    bd_ctxt.name, bd.name, ip_subnet_str,
+                                    subnet_info))
 
     def critical_001(self):
         """
@@ -466,7 +632,7 @@ def acilint():
     creds.add_argument('-o', '--output', required=False, default='console')
     args = creds.get()
     if args.generateconfigfile:
-        print 'Generating configuration file....'
+        print('Generating configuration file....')
         f = args.generateconfigfile
         f.write(('# acilint configuration file\n# Remove or comment out any '
                  'warnings or errors that you no longer wish to see\n'))
@@ -497,12 +663,12 @@ def acilint():
         session = Session(args.url, args.login, args.password)
         resp = session.login()
         if not resp.ok:
-            print '%% Could not login to APIC'
+            print('%% Could not login to APIC')
             sys.exit(0)
 
     html = None
     if args.output == 'html':
-        print 'Creating file lint.html'
+        print('Creating file lint.html')
         html = open('lint.html', 'w')
         html.write("""
         <table border="2" style="width:100%">

@@ -127,6 +127,7 @@ class EndpointHandler(object):
     def __init__(self, my_monitor):
         self.db = {}  # Indexed by remote site
         self.addresses = {}
+        self.mac_tracker = {}
         self.endpoint_add_events = 0
         self.endpoint_del_events = 0
         self._monitor = my_monitor
@@ -233,14 +234,30 @@ class EndpointHandler(object):
         :param endpoint: Instance of IPEndpoint
         :param local_site: Instance of LocalSite
         """
-        epg = endpoint.get_parent()
-        app = epg.get_parent()
-        tenant = app.get_parent()
+        try:
+            epg = endpoint.get_parent()
+            app = epg.get_parent()
+            tenant = app.get_parent()
+        except AttributeError as e:
+            return
         logging.info('endpoint: %s epg: %s app: %s tenant: %s', endpoint.name, epg.name, app.name, tenant.name)
 
         # Ignore events without IP addresses
         if endpoint.ip == '0.0.0.0':
             return
+
+        # Ignore MAC moves i.e. Same IP address appears on different MAC address.
+        # This is the case in situations such as loadbalancer failover.
+        if (tenant.name, app.name, epg.name, endpoint.name) in self.mac_tracker:
+            expected_mac = self.mac_tracker[(tenant.name, app.name, epg.name, endpoint.name)]
+            if endpoint.mac != expected_mac and endpoint.is_deleted():
+                # Ignore this event since it is the old MAC being deleted on a MAC move
+                return
+        if endpoint.is_deleted():
+            if (tenant.name, app.name, epg.name, endpoint.name) in self.mac_tracker:
+                del self.mac_tracker[(tenant.name, app.name, epg.name, endpoint.name)]
+        else:
+            self.mac_tracker[(tenant.name, app.name, epg.name, endpoint.name)] = endpoint.mac
 
         # Track the IP to (Tenant, App, EPG)
         # This is in case the IPs are moving from 1 EPG to another EPG then we want to
@@ -443,6 +460,9 @@ class MultisiteMonitor(threading.Thread):
                 logging.error('Could not find remote site %s', site.name)
                 continue
             for l3out in site.get_interfaces():
+                if l3out.noclean:
+                    continue
+
                 itag = IntersiteTag(export_policy.tenant, export_policy.app, export_policy.epg,
                                     self._local_site.name)
 
@@ -534,6 +554,8 @@ class MultisiteMonitor(threading.Thread):
                     self.handle_endpoint_event()
                 except ConnectionError:
                     logging.error('Could not handle endpoint event due to ConnectionError')
+            else:
+                time.sleep(0.05)
 
 
 class SiteLoginCredentials(object):
@@ -794,6 +816,10 @@ class L3OutPolicy(ConfigObject):
     def tenant(self):
         return self._policy['l3out']['tenant']
 
+    @property
+    def noclean(self):
+        return 'noclean' in self._policy['l3out'] and self._policy['l3out']['noclean'] == "True"
+
     def validate(self):
         if 'l3out' not in self._policy:
             raise ValueError('Expecting "l3out" in interface policy')
@@ -805,6 +831,7 @@ class L3OutPolicy(ConfigObject):
                                   'consumes': '_validate_list',
                                   'protected_by': '_validate_list',
                                   'consumes_interface': '_validate_list',
+                                  'noclean': '_validate_boolean_string',
                                   }
             if item not in keyword_validators:
                 raise ValueError(self.__class__.__name__ + 'Unknown keyword: %s' % item)
@@ -1528,10 +1555,16 @@ def initialize_tool(config):
 
     # For deleted export policies, try and clean up old dangling OutsideEPGs
     # It may not be possible if the Remote Site Policy was also deleted
+
+    local_site = collector.get_local_site()
+    if local_site is None:
+        logging.error('No local site configured')
+        print '%% No local site configured.'
+        return collector
     for remote_site_policy in collector.config.site_policies:
         remote_site = collector.get_site(remote_site_policy.name)
         try:
-            remote_site.remove_old_policies(collector.get_local_site())
+            remote_site.remove_old_policies(local_site)
         except ConnectionError:
             logging.error('Could not remove old policies from remote site')
     return collector
@@ -1849,42 +1882,47 @@ def execute_tool(args, test_mode=False):
     logging.info('Starting the tool....')
     # Handle generating sample configuration
     if args.generateconfig:
-        config = {'config': [
-                                {'site': {'name': '',
-                                          'ip_address': '',
-                                          'username': '',
-                                          'password': '',
-                                          'use_https': '',
-                                          'local': ''}},
-                                {
-                                    "export": {
-                                        "tenant": "",
-                                        "app": "",
-                                        "epg": "",
-                                        "remote_epg": "",
-                                        "remote_sites": [
-                                            {
-                                                "site": {
-                                                    "name": "",
-                                                    "interfaces": [
-                                                        {
-                                                            "l3out": {
-                                                                "name": "",
-                                                                "tenant": "",
-                                                                "provides": [{"contract_name": ""}],
-                                                                "consumes": [{"contract_name": ""}],
-                                                                "protected_by": [{"taboo_name": ""}],
-                                                                "consumes_interface": [{"cif_name": ""}]
-                                                            }
-                                                        }
-                                                    ]
-                                                }
+        config = {
+            'config': [
+                {
+                    'site': {
+                        'name': '',
+                        'ip_address': '',
+                        'username': '',
+                        'password': '',
+                        'use_https': '',
+                        'local': ''
+                    }
+                },
+                {
+                    "export": {
+                        "tenant": "",
+                        "app": "",
+                        "epg": "",
+                        "remote_epg": "",
+                        "remote_sites": [
+                            {
+                                "site": {
+                                    "name": "",
+                                    "interfaces": [
+                                        {
+                                            "l3out": {
+                                                "name": "",
+                                                "tenant": "",
+                                                "provides": [{"contract_name": ""}],
+                                                "consumes": [{"contract_name": ""}],
+                                                "protected_by": [{"taboo_name": ""}],
+                                                "consumes_interface": [{"cif_name": ""}]
                                             }
-                                        ]
-                                    }
+                                        }
+                                    ]
                                 }
-                    ]
+                            }
+                        ]
+                    }
                 }
+            ]
+        }
 
         json_data = json.dumps(config, indent=4, separators=(',', ': '))
         config_file = open('sample_config.json', 'w')

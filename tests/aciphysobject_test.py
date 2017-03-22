@@ -1,5 +1,5 @@
 ################################################################################
-# _    ____ ___                               #
+#                                  _    ____ ___                               #
 #                                 / \  / ___|_ _|                              #
 #                                / _ \| |    | |                               #
 #                               / ___ \ |___ | |                               #
@@ -43,10 +43,11 @@ from acitoolkit.acisession import Session
 from acitoolkit.acitoolkit import Search
 from acitoolkit.aciphysobject import (
     ExternalSwitch, Fantray, Interface, Linecard, Link, Node, PhysicalModel,
-    Pod, Powersupply, Supervisorcard, Systemcontroller
+    Pod, Powersupply, Supervisorcard, Systemcontroller, Cluster
 )
 import json
 import unittest
+
 
 class TestParser(unittest.TestCase):
     def test_parse_dn(self):
@@ -345,7 +346,7 @@ class TestLink(unittest.TestCase):
         link = '101'
 
         link1 = Link('link1', pod)
-        #link1.pod = pod.pod
+        # link1.pod = pod.pod
         link1.pod = pod
         link1.link = link
         link1.node1 = node1
@@ -410,14 +411,14 @@ class TestLink(unittest.TestCase):
                                node=node2_id, module=slot2_id,
                                port=port2_id, parent=linecard2)
         link1 = Link('link1', parent=pod)
-        #link1.pod = pod_id
+        # link1.pod = pod_id
         link1.pod = pod
         link1.link = link_id
-        #link1.node1 = node1_id
+        # link1.node1 = node1_id
         link1.node1 = node1
         link1.slot1 = slot1_id
         link1.port1 = port1_id
-        #link1.node2 = node2_id
+        # link1.node2 = node2_id
         link1.node2 = node2
         link1.slot2 = slot2_id
         link1.port2 = port2_id
@@ -609,6 +610,26 @@ class TestExternalSwitch(unittest.TestCase):
         self.assertRaises(TypeError, ExternalSwitch.get, 'non-session')
 
 
+class TestCluster(unittest.TestCase):
+    def test_basic_create(self):
+        cluster = Cluster('test-cluster')
+        self.assertTrue(isinstance(cluster, Cluster))
+
+    def test_get_config_size(self):
+        cluster = Cluster('test-cluster')
+        cluster.config_size = 50
+        self.assertEqual(cluster.get_config_size(), 50)
+
+    def test_get_cluster_size(self):
+        cluster = Cluster('test-cluster')
+        cluster.cluster_size = 50
+        self.assertEqual(cluster.get_cluster_size(), 50)
+
+    def test_get_apics(self):
+        cluster = Cluster('test-cluster')
+        self.assertEqual(len(cluster.get_apics()), 0)
+
+
 class TestLiveAPIC(unittest.TestCase):
     def login_to_apic(self):
         """Login to the APIC
@@ -618,6 +639,13 @@ class TestLiveAPIC(unittest.TestCase):
         resp = session.login()
         self.assertTrue(resp.ok)
         return session
+
+
+class TestLiveCluster(TestLiveAPIC):
+    def test_basic(self):
+        session = self.login_to_apic()
+        cluster = Cluster.get(session)
+        self.assertTrue(isinstance(cluster, Cluster))
 
 
 class TestLivePod(TestLiveAPIC):
@@ -700,7 +728,7 @@ class TestLivePod(TestLiveAPIC):
     def test_node_get_invalid_parent(self):
         session = self.login_to_apic()
         pod = PhysicalModel()
-        self.assertRaises(TypeError,Node.get,session, parent=pod)
+        self.assertRaises(TypeError, Node.get, session, parent=pod)
 
     def test_switch_children(self):
         spine, session = self.get_spine()
@@ -726,7 +754,7 @@ class TestLivePod(TestLiveAPIC):
 
         self.assertIn('ConcreteAccCtrlRule', children_types)
         self.assertIn('ConcreteOverlay', children_types)
-        self.assertIn('ConcretePortChannel', children_types)
+        # self.assertIn('ConcretePortChannel', children_types)
         self.assertIn('ConcreteFilter', children_types)
         self.assertIn('ConcreteLoopback', children_types)
         self.assertIn('ConcreteContext', children_types)
@@ -785,8 +813,8 @@ class TestLivePod(TestLiveAPIC):
         """
         attributes = branch.get_attributes()
         for attr in attributes:
-            if not isinstance(attributes[attr], str) and not isinstance(attributes[attr], list) :
-                print('Attribute '+str(attr)+' of '+ branch.__class__.__name__ + ' should be str or list')
+            if not isinstance(attributes[attr], str) and not isinstance(attributes[attr], list):
+                print('Attribute ' + str(attr) + ' of ' + branch.__class__.__name__ + ' should be str or list')
                 self.assertTrue(False)
         children = branch.get_children()
         for child in children:
@@ -797,7 +825,6 @@ class TestLivePod(TestLiveAPIC):
         physical_model = PhysicalModel.get(session)[0]
         physical_model.populate_children(deep=True, include_concrete=True)
         self.check_children_attributes(physical_model)
-
 
     def test_link_get_for_node(self):
         session = self.login_to_apic()
@@ -852,7 +879,7 @@ class TestLivePod(TestLiveAPIC):
             children_types.add(child.get_type())
 
         self.assertEqual(len(children_types), 3)
-        self.assertIn('systemctrlcard', children_types)
+        self.assertTrue('systemctrlcard' in children_types or 'motherboard' in children_types)
         self.assertIn('fantray', children_types)
         self.assertIn('powersupply', children_types)
 
@@ -960,8 +987,9 @@ class TestLivePod(TestLiveAPIC):
             module_types.add(module.get_type())
             if module.get_type() == 'linecard':
                 linecard = module
-
-        self.assertEqual(len(module_types ^ {'linecard', 'supervisor', 'powersupply', 'fantray'}), 0)
+        for known_type in ['linecard', 'supervisor', 'powersupply', 'fantray']:
+            module_types.discard(known_type)
+        self.assertEqual(len(module_types), 0)
 
         interfaces = linecard.get_children()
         for interface in interfaces:
@@ -973,7 +1001,9 @@ class TestLivePod(TestLiveAPIC):
         module_types = set()
         for module in modules:
             module_types.add(module.get_type())
-        self.assertEqual(len(module_types ^ {'systemctrlcard', 'powersupply', 'fantray'}), 0)
+        for known_type in ['motherboard', 'systemctrlcard', 'powersupply', 'fantray', 'supervisor']:
+            module_types.discard(known_type)
+        self.assertEqual(len(module_types), 0)
 
         links = pod.get_children(Link)
         for link in links:
@@ -1101,7 +1131,7 @@ class TestLivePod(TestLiveAPIC):
         :return:
         """
         session = self.login_to_apic()
-        parent = Node('1','101','Switch')
+        parent = Node('1', '101', 'Switch')
         self.assertRaises(TypeError, Pod.get, session, parent)
 
 
@@ -1150,8 +1180,8 @@ class TestInterface(unittest.TestCase):
                          'ildren": [{"infraRsVlanNs": {"attributes": {"tDn": "u'
                          'ni/infra/vlanns-allvlans-static"}, "children": []}}]}'
                          '}')
-        self.assertEqual(json.dumps(phydomain_json, sort_keys=True), 
-                                                                  expected_json)
+        self.assertEqual(json.dumps(phydomain_json, sort_keys=True),
+                         expected_json)
 
     def test_create_valid(self):
         intf = Interface('eth', '1', '1', '1', '1')
@@ -1382,10 +1412,12 @@ if __name__ == '__main__':
     offline.addTest(unittest.makeSuite(TestExternalSwitch))
     offline.addTest(unittest.makeSuite(TestFind))
     offline.addTest(unittest.makeSuite(TestInterface))
+    offline.addTest(unittest.makeSuite(TestCluster))
 
     live = unittest.TestSuite()
     live.addTest(unittest.makeSuite(TestLiveAPIC))
     live.addTest(unittest.makeSuite(TestLivePod))
+    live.addTest(unittest.makeSuite(TestLiveCluster))
 
     full = unittest.TestSuite([live, offline])
 

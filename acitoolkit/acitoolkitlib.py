@@ -34,8 +34,9 @@ import argparse
 import getpass
 import os
 import acitoolkit
-import aciphysobject
 import inspect
+
+from . import aciphysobject
 from graphviz import Digraph
 
 
@@ -87,6 +88,14 @@ class Credentials(object):
             DEFAULT_URL = set_default('url')
             DEFAULT_LOGIN = set_default('login')
             DEFAULT_PASSWORD = set_default('password')
+            DEFAULT_CERT_NAME = set_default('cert_name')
+            DEFAULT_KEY = set_default('key')
+            #if DEFAULT_PASSWORD is not None:
+            #    DEFAULT_CERT_NAME = set_default('cert_name')
+            #    DEFAULT_KEY = set_default('key')
+            # else:
+            #     DEFAULT_CERT_NAME = None
+            #     DEFAULT_KEY = None
             self._parser.add_argument('-u', '--url',
                                       default=DEFAULT_URL,
                                       help='APIC URL e.g. http://1.2.3.4')
@@ -96,6 +105,12 @@ class Credentials(object):
             self._parser.add_argument('-p', '--password',
                                       default=DEFAULT_PASSWORD,
                                       help='APIC login password.')
+            self._parser.add_argument('--cert-name',
+                                      default=DEFAULT_CERT_NAME,
+                                      help='X.509 certificate name attached to APIC AAA user')
+            self._parser.add_argument('--key',
+                                      default=DEFAULT_KEY,
+                                      help='Private key matching given certificate, used to generate authentication signature')
         if 'nosnapshotfiles' not in qualifier and 'apic' in qualifier:
             self._parser.add_argument('--snapshotfiles', nargs='+',
                                       help='APIC configuration files')
@@ -211,8 +226,15 @@ class Credentials(object):
                 self._args.login = self._get_from_user('APIC login username: ')
             if self._args.url is None:
                 self._args.url = self._get_from_user('APIC URL: ')
-            if self._args.password is None:
+
+            if self._args.password is None and not (self._args.cert_name or self._args.key):
                 self._args.password = self._get_password('APIC Password: ')
+            elif self._args.password is None:
+                if self._args.cert_name is None:
+                    self._args.cert_name = self._get_from_user('Certificate Name: ')
+                if self._args.key is None:
+                    self._args.key = self._get_from_user('Private Key: ')
+
         if 'mysql' in self._qualifier:
             if self._args.mysqlip is None:
                 self._args.mysqlip = self._get_from_user('MySQL IP address: ')
@@ -232,6 +254,7 @@ class AcitoolkitGraphBuilder(object):
     def build_graph_from_parent(root_parent_name):
         """
         Create a graph starting from the root class name
+
         :param root_parent_name: String containing the class name to use as the root of the class hierarchy graph
         :return: None
         """

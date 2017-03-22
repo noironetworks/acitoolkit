@@ -39,7 +39,7 @@ import acitoolkit as ACI
 # Take login credentials from the command line if provided
 # Otherwise, take them from your environment variables file ~/.profile
 description = 'Simple application that logs on to the APIC and displays reports for the switches.'
-creds = ACI.Credentials('apic', description)
+creds = ACI.Credentials('apic, nosnapshotfiles', description)
 creds.add_argument('-s', '--switch',
                    type=str,
                    default=None,
@@ -52,6 +52,7 @@ creds.add_argument('-supervisor', action="store_true", help='Show Supervisor Car
 creds.add_argument('-fantray', action="store_true", help='Show Fantray info')
 creds.add_argument('-powersupply', action="store_true", help='Show Power Supply info')
 creds.add_argument('-arp', action="store_true", help='Show ARP info')
+creds.add_argument('-cdp', action="store_true", help='Show CDP info')
 creds.add_argument('-context', action="store_true", help='Show Context (VRF) info')
 creds.add_argument('-bridgedomain', action="store_true", help='Show Bridge Domain info')
 creds.add_argument('-svi', action="store_true", help='Show SVI info')
@@ -147,6 +148,9 @@ def render_text_switch(switch, table_format):
     if args.all or args.arp:
         text_string += render_tables(switch, ACI.ConcreteArp, title, table_format)
 
+    if args.all or args.cdp:
+        text_string += render_tables(switch, ACI.ConcreteCdp, title, table_format)
+
     if args.all or args.endpoint:
         text_string += render_tables(switch, ACI.ConcreteEp, title, table_format)
 
@@ -206,6 +210,7 @@ if (args.all or
         args.fantray or
         args.powersupply or
         args.arp or
+        args.cdp or
         args.context or
         args.bridgedomain or
         args.svi or

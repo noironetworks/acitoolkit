@@ -22,24 +22,27 @@ _about_exports = [
     "__title__", "__uri__", "__version__",
 ]
 
-from .acibaseobject import Tag  # noqa
 from .acicounters import (  # noqa
     AtomicCounter, AtomicCountersOnGoing, AtomicNode, AtomicPath,
     InterfaceStats,
 )
 from .aciHealthScore import HealthScore  # noqa
+from .aciFaults import (Faults)  # noqa
 from .aciSearch import AciSearch, Searchable  # noqa
 from .acisession import EventHandler, Login, Session, Subscriber  # noqa
 from .aciTable import Table  # noqa
+from .acibaseobject import BaseACIObject, BaseRelation
 from .acitoolkit import (  # noqa
-    AnyEPG, AppProfile, AttributeCriterion, BGPSession, BridgeDomain, CollectionPolicy,
+    AnyEPG, AppProfile, AttributeCriterion, BaseContract,
+    BGPSession, BridgeDomain, CollectionPolicy,
     CommonEPG, Context, Contract, ContractInterface, ContractSubject, Endpoint,
-    EPG, EPGDomain, FexInterface, Filter, FilterEntry, IPEndpoint, L2ExtDomain,
-    L2Interface, L3ExtDomain, L3Interface, LogicalModel, MonitorPolicy,
+    EPG, EPGDomain, FexInterface, Filter, FilterEntry, IPEndpoint, InputTerminal,
+    L2ExtDomain, L2Interface, L3ExtDomain, L3Interface, LogicalModel, MonitorPolicy,
     MonitorStats, MonitorTarget, NetworkPool, OSPFInterface,
-    OSPFInterfacePolicy, OSPFRouter, OutsideEPG, OutsideL3, OutsideNetwork,
+    OSPFInterfacePolicy, OSPFRouter, OutputTerminal, OutsideEPG,
+    OutsideL2, OutsideL2EPG, OutsideL3, OutsideNetwork,
     PhysDomain, PortChannel, Search, Subnet, Taboo, Tenant, TunnelInterface,
-    VMM, VMMCredentials, VmmDomain, VMMvSwitchInfo,
+    VMM, VMMCredentials, VmmDomain, VMMvSwitchInfo, Tag
 )
 from .acitoolkitlib import Credentials, AcitoolkitGraphBuilder  # noqa
 from .acifakeapic import FakeSession  # noqa
@@ -48,7 +51,7 @@ from .aciConcreteLib import (  # noqa
     ConcreteAccCtrlRule, ConcreteArp, ConcreteBD, ConcreteContext, ConcreteEp,
     ConcreteFilter, ConcreteFilterEntry, ConcreteLoopback, ConcreteOverlay,
     ConcretePortChannel, ConcreteSVI, ConcreteVpc, ConcreteVpcIf,
-    ConcreteTunnel,
+    ConcreteTunnel, ConcreteCdp
 )
 # Dependent on aciconcretelib
 from .aciphysobject import (  # noqa

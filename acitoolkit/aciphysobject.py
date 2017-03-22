@@ -187,21 +187,21 @@ class Cluster(BaseACIObject):
     """
     Represents the global settings of the Cluster
     """
-
-    def __init__(self, name):
+    def __init__(self, name, parent=None):
         """
         :param name:  String containing the name of this Cluster object.
         """
-        super(Cluster, self).__init__(name)
+        super(Cluster, self).__init__(name, parent)
         self.name = name
         self.config_size = None
         self.cluster_size = None
         self.apics = []
 
-    def get(self, session, parent=None):
+    @classmethod
+    def get(cls, session, parent=None):
         """Gets all of the Clusters from the APIC.
 
-        :returns: list of Clusters.
+        :returns: Instance of Cluster class.
         """
         # start at top
         infra_query_url = '/api/node/class/infraCont.json'
@@ -210,11 +210,12 @@ class Cluster(BaseACIObject):
         infra_cluster_url = '/api/node/class/infraClusterPol.json'
         ret = session.get(infra_cluster_url)
         ret_cluster = ret.json()['imdata']
-        self.config_size = ret_cluster[0]['infraClusterPol']['attributes']['size']
+        cluster = cls('apic-cluster', parent=parent)
+        cluster.config_size = ret_cluster[0]['infraClusterPol']['attributes']['size']
         for apic in cluster_info:
-            self.apics.append(apic['infraCont']['attributes']['dn'])
-        self._populate_from_attributes(cluster_info[0]['infraCont']['attributes'])
-        return cluster_info
+            cluster.apics.append(apic['infraCont']['attributes']['dn'])
+        cluster._populate_from_attributes(cluster_info[0]['infraCont']['attributes'])
+        return cluster
 
     def _populate_from_attributes(self, attributes):
         """"Fills in an object with desired attributes.
@@ -222,18 +223,15 @@ class Cluster(BaseACIObject):
         self.cluster_size = str(attributes['size'])
         self.name = str(attributes['fbDmNm'])
 
-    def get_config_size(self, session):
+    def get_config_size(self):
         """
-
-        :param session:
         :returns: configured size of the cluster, i.e. # of APICs
         """
         return self.config_size
 
-    def get_cluster_size(self, session):
+    def get_cluster_size(self):
         """
         reads information about the APIC cluster
-        :param session:
         :return:
         """
         return self.cluster_size
@@ -1346,12 +1344,14 @@ class Node(BaseACIPhysObject):
         from .aciConcreteLib import (
             ConcreteAccCtrlRule, ConcreteArp, ConcreteBD, ConcreteContext,
             ConcreteEp, ConcreteFilter, ConcreteLoopback, ConcreteOverlay,
-            ConcretePortChannel, ConcreteVpc
+            ConcretePortChannel, ConcreteVpc,
+            ConcreteCdp, ConcreteLLdp
         )
 
         return [ConcreteArp, ConcreteAccCtrlRule, ConcreteBD, ConcreteOverlay,
                 ConcretePortChannel, ConcreteEp, ConcreteFilter, ConcreteLoopback,
-                ConcreteContext, ConcreteVpc]
+                ConcreteContext, ConcreteVpc,
+                ConcreteCdp, ConcreteLLdp]
 
     @classmethod
     def _get_apic_classes(cls):
@@ -1436,7 +1436,7 @@ class Node(BaseACIPhysObject):
             working_data = WorkingData(session, Node, base_url)
 
         else:
-            class_url = '/api/node/class/fabricNode.json?'
+            class_url = '/api/node/class/fabricNode.json'
             ret = session.get(class_url)
             ret._content = ret._content.decode().replace('\n', '').encode()
             data = ret.json()['imdata']
@@ -2480,7 +2480,11 @@ class Interface(BaseInterface):
         self._parent = parent
         if parent:
             self._parent.add_child(self)
-        self.stats = InterfaceStats(self, self.attributes.get('dn'))
+        try:
+            dn = self.attributes['dn']
+        except KeyError:
+            dn = 'topology/pod-%s/node-%s/sys/phys-[%s%s/%s]' % (pod, node, interface_type, module, port)
+        self.stats = InterfaceStats(self, dn)
 
         self.attributes['interface_type'] = str(interface_type)
         self.attributes['pod'] = str(pod)
@@ -2586,9 +2590,30 @@ class Interface(BaseInterface):
         return '%s-%s-%s-%s' % (self.pod, self.node,
                                 self.module, self.port)
 
+    def push_to_apic(self, session):
+        """
+        Push the configuration to the APIC
+
+        :param session: the instance of Session used for APIC communication
+        :returns: Response class instance from the requests library.\
+                  response.ok is True if request is sent successfully.
+        """
+        for i in range(0, len(self.get_url())):
+            if self.get_json()[i] is not None and self.get_url()[i] is not None:
+                resp = session.push_to_apic(self.get_url()[i],
+                                            self.get_json()[i])
+                if not resp.ok:
+                    print('%% Error: Could not push configuration to APIC for url:', self.get_url()[i])
+                    return resp
+        return resp
+
     def get_json(self):
-        """ Get the json for an interface.  Returns a tuple since the json is
-            required to be sent in 2 posts.
+        """
+        Get the json for an interface.  Returns a tuple since the json is
+        required to be sent in multiple posts. A call to get_url will return
+        the URLs which the JSON can be sent.
+
+        :return: Tuple containing the phys_domain, fabric, infra JSONs
         """
         fabric = None
         # Physical Domain json
@@ -2701,6 +2726,10 @@ class Interface(BaseInterface):
         name = name.split()[1]
         (pod, node, module, port) = name.split('/')
         return interface_type, pod, node, module, port
+
+    @classmethod
+    def create_from_name(cls, name):
+        return cls(*cls.parse_name(name))
 
     @staticmethod
     def _parse_physical_dn(dn):
@@ -2929,7 +2958,7 @@ class Interface(BaseInterface):
                                  'must be identified by a string'))
         else:
             if pod_parent:
-                if not isinstance(pod_parent,  cls._get_parent_class()):
+                if not isinstance(pod_parent, cls._get_parent_class()):
                     raise TypeError('Interface parent must be a {0} object'.format(cls._get_parent_class()))
 
         cdp_policies = Interface._get_discoveryprot_policies(session, 'cdp')
@@ -2982,12 +3011,17 @@ class Interface(BaseInterface):
                 attributes['name'] = str(interface['l1PhysIf']['attributes']['name'])
                 attributes['descr'] = str(interface['l1PhysIf']['attributes']['descr'])
                 attributes['usage'] = str(interface['l1PhysIf']['attributes']['usage'])
-                (interface_type, pod, node,
-                 module, port) = Interface.parse_dn(dist_name)
-                attributes['operSt'] = eth_data_dict[dist_name + '/phys']['operSt']
-                interface_obj = Interface(interface_type, pod, node, module, port,
-                                          parent=None, session=session,
-                                          attributes=attributes)
+                try:
+                    attributes['operSt'] = eth_data_dict[dist_name + '/phys']['operSt']
+                    attributes['operSpeed'] = eth_data_dict[dist_name + '/phys']['operSpeed']
+                except KeyError:
+                    attributes['operSt'] = 'unknown'
+                    attributes['operSpeed'] = 'unknown'
+
+                interface_obj = ACI._interface_from_dn(dist_name)
+                for attribute in attributes:
+                    interface_obj.attributes[attribute] = attributes[attribute]
+                interface_obj._session = session
                 interface_obj.porttype = porttype
                 interface_obj.adminstatus = adminstatus
                 interface_obj.speed = speed
@@ -3013,7 +3047,7 @@ class Interface(BaseInterface):
 
     def __eq__(self, other):
         # TODO: simplify and isinstance
-        if type(self) != type(other):
+        if not isinstance(self, type(other)):
             return False
         if (self.interface_type == other.interface_type and
                 self.pod == other.pod and
@@ -3068,7 +3102,6 @@ class WorkingData(object):
         self.add(session, toolkit_class, url, deep, include_concrete)
 
     def add(self, session=None, toolkit_class=None, url=None, deep=False, include_concrete=False):
-
         """
 
         :param session:
@@ -3162,7 +3195,7 @@ class WorkingData(object):
             for class_record in classes:
                 for class_id in class_record:
                     obj_dn = class_record[class_id]['attributes']['dn']
-                    if obj_dn.startswith(dname+'/'):
+                    if obj_dn.startswith(dname + '/'):
                         result.append(class_record)
         return result
 
@@ -3278,6 +3311,8 @@ class Process(BaseACIPhysObject):
         ret = session.get(node_query_url)
         processes = ret.json()['imdata']
         for child in processes:
+            if 'procProc' not in child:
+                continue
             if child['procProc']:
                 process = Process()
                 process._populate_from_attributes(child['procProc']['attributes'])
@@ -3475,6 +3510,7 @@ class Fabric(BaseACIObject):
 
     From this class, you can populate all of the children classes.
     """
+
     def __init__(self, session=None, parent=None):
         """
         Initialization method that sets up the Fabric.

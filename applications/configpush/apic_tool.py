@@ -29,6 +29,11 @@ def main():
     parser.add_argument('--displayonly', action='store_true', default=False,
                         help=('Only display the JSON configuration. '
                               'Do not actually push to the APIC.'))
+    parser.add_argument('--prompt', action='store_true', default=False,
+                        help=('prompts a message to update the tenant with reference to the given config.'
+                              'y/n/all ? if yes does the action specified in the message.'
+                              'if all,this would allow the user to accept all changes/update.'
+                              'if just pressed enter then the default is taken as no'))
     parser.add_argument('--useipepgs', action='store_true', default=False,
                         help=('Use IP based microsegmented EPGS to '
                               'assign the endpoint to the EPG.'))
@@ -38,6 +43,9 @@ def main():
     parser.add_argument('--app',
                         default='acitoolkitapp',
                         help='Application profile name for the configuration')
+    parser.add_argument('--l3ext',
+                        default='L3OUT',
+                        help='External Routed Network name for the configuration')
 
     args = parser.parse_args()
     if args.config is None:
@@ -55,7 +63,7 @@ def main():
         print 'Could not load improperly formatted configuration file'
         return
 
-    if not args.displayonly and 'apic' not in config:
+    if 'apic' not in config:
         if args.url is None or args.login is None or args.password is None:
             print 'APIC credentials not given'
             return
