@@ -37,7 +37,10 @@ import acitoolkit
 import inspect
 
 from . import aciphysobject
-from graphviz import Digraph
+try:
+    from graphviz import Digraph
+except ImportError:
+    pass
 
 
 class Credentials(object):
