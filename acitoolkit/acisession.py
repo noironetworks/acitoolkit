@@ -194,22 +194,18 @@ class Subscriber(threading.Thread):
             self._subscriptions[url] = None
             logging.error('Could not send subscription to APIC for url %s', url)
             resp = requests.Response()
-            resp.status_code = 404
-            resp._content = '{"error": "Could not send subscription to APIC"}'
+            resp.status_code = 598
+            resp._content = '{"error": "ConnectionError"}'
             return resp
         if not resp.ok:
             self._subscriptions[url] = None
-            logging.error('Could not send subscription to APIC for url %s', url)
-            resp = requests.Response()
-            resp.status_code = 404
-            resp._content = '{"error": "Could not send subscription to APIC"}'
             return resp
         resp_data = json.loads(resp.text)
         if 'subscriptionId' not in resp_data:
             logging.error('Did not receive proper subscription response from APIC for url %s response: %s', url, resp_data)
             resp = requests.Response()
-            resp.status_code = 404
-            resp._content = '{"error": "Could not send subscription to APIC"}'
+            resp.status_code = 500
+            resp._content = '{"error": "subscriptionId not in response"}'
             return resp
         subscription_id = resp_data['subscriptionId']
         self._subscriptions[url] = subscription_id
