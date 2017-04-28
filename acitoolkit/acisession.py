@@ -189,7 +189,7 @@ class Subscriber(threading.Thread):
         :param url: URL string to issue the subscription
         """
         try:
-            resp = self._apic.get(url)
+            resp = self._apic.get(url, ws_session=self._apic.token)
         except ConnectionError:
             self._subscriptions[url] = None
             logging.error('Could not send subscription to APIC for url %s', url)
@@ -260,19 +260,23 @@ class Subscriber(threading.Thread):
                            should be secure.  Default is True.
         """
         sslopt = {}
+        url = 'socket%s' % self._apic.token
         if use_secure:
             sslopt['cert_reqs'] = ssl.CERT_NONE
-            self._ws_url = 'wss://%s/socket%s' % (self._apic.ipaddr,
-                                                  self._apic.token)
+            self._ws_url = 'wss://%s/%s' % (self._apic.ipaddr, url)
         else:
-            self._ws_url = 'ws://%s/socket%s' % (self._apic.ipaddr,
-                                                 self._apic.token)
+            self._ws_url = 'ws://%s/%s' % (self._apic.ipaddr, url)
 
         kwargs = {}
         if self._ws is not None:
             if self._ws.connected:
                 self._ws.close()
                 self.event_handler_thread.exit()
+        cookies = self._apic._prep_x509_header('GET', '/' + url)
+        if cookies:
+            header = {"Cookie": '; '.join(['%s=%s' % (k,v) for k,v in
+                                           cookies.iteritems()])}
+            kwargs['header'] = header
         try:
             self._ws = create_connection(self._ws_url, sslopt=sslopt, **kwargs)
             if not self._ws.connected:
@@ -411,7 +415,7 @@ class Subscriber(threading.Thread):
             unsubscribe_url = url.split('?subscription=yes')[0] + '?subscription=no'
         else:
             raise ValueError('No subscription string in URL being unsubscribed')
-        resp = self._apic.get(unsubscribe_url)
+        resp = self._apic.get(unsubscribe_url, ws_session=self._apic.token)
         if not resp.ok:
             logging.warning('Could not unsubscribe from url: %s', unsubscribe_url)
         # Chew up any outstanding events
@@ -496,12 +500,6 @@ class Session(object):
                 Please install it using "pip install pyopenssl"')
 
             self.cert_auth = True
-            # Cert based auth does not support subscriptions :(
-            # there's an exception for appcenter_user relying on the requestAppToken api
-            if subscription_enabled and not self.appcenter_user:
-                logging.warning('Disabling subscription support as certificate authentication does not support it.')
-                logging.warning('Consider passing subscription_enabled=False to hide this warning message.')
-                subscription_enabled = False
             # Disable the warnings for SSL
             if not verify_ssl:
                 try:
@@ -610,10 +608,14 @@ class Session(object):
                 pass
         self.session = requests.Session()
         self._logged_in = False
+        ws_session = False
 
         if self.appcenter_user and self._subscription_enabled:
             login_url = '/api/requestAppToken.json'
             data = {'aaaAppToken': {'attributes': {'appName': self.cert_name}}}
+        elif self.cert_auth and self._subscription_enabled:
+            login_url = '/api/webtokenSession.json'
+            ws_session = True
         elif self.cert_auth:
             logging.warning('Will not explicitly login because certificate based authentication is being used for this session.')
             logging.warning('If permanently using cert auth, consider removing the call to login().')
@@ -623,7 +625,11 @@ class Session(object):
             login_url = '/api/aaaLogin.json'
             data = {'aaaUser': {'attributes': {'name': self.uid,
                                                'pwd': self.pwd}}}
-        ret = self.push_to_apic(login_url, data=data, timeout=timeout)
+        if ws_session:
+            ret = self.get(login_url, timeout=timeout)
+        else:
+            ret = self.push_to_apic(login_url, data=data, timeout=timeout)
+
         if not ret.ok:
             logging.error('Could not relogin to APIC. Aborting login thread.')
             self.login_thread.exit()
@@ -631,8 +637,14 @@ class Session(object):
             return ret
         self._logged_in = True
         ret_data = json.loads(ret.text)['imdata'][0]
-        timeout = ret_data['aaaLogin']['attributes']['refreshTimeoutSeconds']
-        self.token = str(ret_data['aaaLogin']['attributes']['token'])
+        if ws_session:
+            timeout = 12 * 60 * 60
+            self.token = str(
+                ret_data['webtokenSession']['attributes']['token'])
+        else:
+            timeout = ret_data['aaaLogin']['attributes'][
+                'refreshTimeoutSeconds']
+            self.token = str(ret_data['aaaLogin']['attributes']['token'])
         if self._subscription_enabled:
             self.subscription_thread._open_web_socket('https://' in self.api)
         timeout = int(timeout)
@@ -794,7 +806,7 @@ class Session(object):
         logging.debug('Response: %s %s', resp, resp.text)
         return resp
 
-    def get(self, url, timeout=None):
+    def get(self, url, timeout=None, ws_session=None):
         """
         Perform a REST GET call to the APIC.
 
@@ -808,6 +820,8 @@ class Session(object):
         logging.debug(get_url)
 
         cookies = self._prep_x509_header('GET', url)
+        if ws_session:
+            cookies['APIC-WebSocket-Session'] = ws_session
         resp = self.session.get(get_url, timeout=timeout, verify=self.verify_ssl, proxies=self._proxies, cookies=cookies)
         if resp.status_code == 403:
             if self.cert_auth and not (self.appcenter_user and self._subscription_enabled):
