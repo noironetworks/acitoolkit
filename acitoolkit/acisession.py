@@ -417,7 +417,7 @@ class Subscriber(threading.Thread):
         # Chew up any outstanding events
         while self.has_events(url):
             self.get_event(url)
-        del self._subscriptions[url]
+        self._subscriptions.pop(url, None)
         if not self._subscriptions:
             self._ws.close(timeout=0)
 
