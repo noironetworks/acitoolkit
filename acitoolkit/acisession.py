@@ -189,7 +189,7 @@ class Subscriber(threading.Thread):
         :param url: URL string to issue the subscription
         """
         try:
-            resp = self._apic.get(url, ws_session=self._apic.token)
+            resp = self._apic.get(url)
         except ConnectionError:
             self._subscriptions[url] = None
             logging.error('Could not send subscription to APIC for url %s', url)
@@ -260,7 +260,7 @@ class Subscriber(threading.Thread):
                            should be secure.  Default is True.
         """
         sslopt = {}
-        url = 'socket%s' % self._apic.token
+        url = 'socket%s' % (self._apic.ws_token or self._apic.token)
         if use_secure:
             sslopt['cert_reqs'] = ssl.CERT_NONE
             self._ws_url = 'wss://%s/%s' % (self._apic.ipaddr, url)
@@ -415,7 +415,7 @@ class Subscriber(threading.Thread):
             unsubscribe_url = url.split('?subscription=yes')[0] + '?subscription=no'
         else:
             raise ValueError('No subscription string in URL being unsubscribed')
-        resp = self._apic.get(unsubscribe_url, ws_session=self._apic.token)
+        resp = self._apic.get(unsubscribe_url)
         if not resp.ok:
             logging.warning('Could not unsubscribe from url: %s', unsubscribe_url)
         # Chew up any outstanding events
@@ -461,26 +461,26 @@ class Session(object):
         directly to the Requests library
 
         """
-        if not isinstance(url, str):
+        if not isinstance(url, basestring):
             url = str(url)
-        if not isinstance(uid, str):
+        if not isinstance(uid, basestring):
             uid = str(uid)
-        if not isinstance(pwd, str):
+        if not isinstance(pwd, basestring):
             pwd = str(pwd)
-        if not isinstance(url, str):
+        if not isinstance(url, basestring):
             raise CredentialsError("The URL or APIC address must be a string")
-        if not isinstance(uid, str):
+        if not isinstance(uid, basestring):
             raise CredentialsError("The user ID must be a string")
         if (pwd is None or pwd == 'None') and not cert_name and not key:
             raise CredentialsError("An authentication method must be provided")
         if pwd:
-            if not isinstance(pwd, str):
+            if not isinstance(pwd, basestring):
                 raise CredentialsError("The password must be a string")
         if cert_name:
-            if not isinstance(cert_name, str):
+            if not isinstance(cert_name, basestring):
                 raise CredentialsError("The certificate name must be a string")
         if key:
-            if not isinstance(key, str):
+            if not isinstance(key, basestring):
                 raise CredentialsError("The key path must be a string")
         if (cert_name and not key) or (not cert_name and key):
                 raise CredentialsError("Both a certificate name and private key must be provided")
@@ -520,6 +520,7 @@ class Session(object):
         self.session = None
         self.verify_ssl = verify_ssl
         self.token = None
+        self.ws_token = None
         self.login_thread = Login(self)
         self._relogin_callbacks = []
         self.login_error = False
@@ -639,7 +640,7 @@ class Session(object):
         ret_data = json.loads(ret.text)['imdata'][0]
         if ws_session:
             timeout = 12 * 60 * 60
-            self.token = str(
+            self.ws_token = str(
                 ret_data['webtokenSession']['attributes']['token'])
         else:
             timeout = ret_data['aaaLogin']['attributes'][
@@ -806,7 +807,7 @@ class Session(object):
         logging.debug('Response: %s %s', resp, resp.text)
         return resp
 
-    def get(self, url, timeout=None, ws_session=None):
+    def get(self, url, timeout=None):
         """
         Perform a REST GET call to the APIC.
 
@@ -820,8 +821,8 @@ class Session(object):
         logging.debug(get_url)
 
         cookies = self._prep_x509_header('GET', url)
-        if ws_session:
-            cookies['APIC-WebSocket-Session'] = ws_session
+        if self.ws_token:
+            cookies['APIC-WebSocket-Session'] = self.ws_token
         resp = self.session.get(get_url, timeout=timeout, verify=self.verify_ssl, proxies=self._proxies, cookies=cookies)
         if resp.status_code == 403:
             if self.cert_auth and not (self.appcenter_user and self._subscription_enabled):
