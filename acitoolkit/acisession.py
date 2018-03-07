@@ -51,7 +51,7 @@ try:
     from requests.packages.urllib3.exceptions import InsecureRequestWarning
 except ImportError:
     pass
-from six.moves.queue import Queue
+from six.moves import queue
 from websocket import create_connection, WebSocketException
 from requests.exceptions import ConnectionError
 try:
@@ -171,7 +171,7 @@ class Subscriber(threading.Thread):
         self._ws = None
         self._ws_url = None
         self._refresh_time = 30
-        self._event_q = Queue()
+        self._event_q = queue.Queue()
         self._events = {}
         self._exit = False
         self.event_handler_thread = None
@@ -313,7 +313,11 @@ class Subscriber(threading.Thread):
             return
 
         while not self._event_q.empty():
-            event = self._event_q.get()
+            try:
+                event = self._event_q.get(block=False)
+            except queue.Empty:
+                logging.debug("event queue is empty after check.")
+                continue
             orig_event = event
             try:
                 event = json.loads(event)
