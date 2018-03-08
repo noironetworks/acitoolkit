@@ -415,15 +415,24 @@ class Subscriber(threading.Thread):
             unsubscribe_url = url.split('?subscription=yes')[0] + '?subscription=no'
         else:
             raise ValueError('No subscription string in URL being unsubscribed')
-        resp = self._apic.get(unsubscribe_url)
+        try:
+            resp = self._apic.get(unsubscribe_url)
+        except ConnectionError:
+            logging.error('Could not send unsubscribe to APIC for url %s', url)
+            resp = requests.Response()
+            resp.status_code = 598
+            resp._content = '{"error": "ConnectionError"}'
+            return resp
         if not resp.ok:
-            logging.warning('Could not unsubscribe from url: %s', unsubscribe_url)
+            logging.warning('Could not unsubscribe from url: %s',unsubscribe_url)
+            return resp
         # Chew up any outstanding events
         while self.has_events(url):
             self.get_event(url)
         self._subscriptions.pop(url, None)
         if not self._subscriptions:
             self._ws.close(timeout=0)
+        return resp
 
     def run(self):
         while not self._exit:
@@ -698,6 +707,11 @@ class Session(object):
         """
         Close the session
         """
+        self.login_thread.exit()
+        try:
+            self.subscription_thread.exit()
+        except AttributeError:
+            pass
         self.session.close()
 
     def subscribe(self, url, only_new=False):
@@ -768,7 +782,8 @@ class Session(object):
         :param url:  URL string to remove issue subscription
         """
         if self._subscription_enabled:
-            self.subscription_thread.unsubscribe(url)
+            resp = self.subscription_thread.unsubscribe(url)
+            return resp
 
     def push_to_apic(self, url, data, timeout=None):
         """
