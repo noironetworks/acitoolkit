@@ -106,7 +106,7 @@ class Login(threading.Thread):
             self._apic.invoke_login_callbacks()
 
     def run(self):
-        while not self._exit:
+        while not self._exit and not self._apic.login_error:
             time.sleep(self._login_timeout)
             try:
                 resp = self._apic.refresh_login(timeout=120)
@@ -442,10 +442,7 @@ class Subscriber(threading.Thread):
         while not self._exit:
             # Sleep for some interval and send subscription list
             time.sleep(self._refresh_time)
-            try:
-                self.refresh_subscriptions()
-            except ConnectionError:
-                logging.error('Could not refresh subscriptions due to ConnectionError')
+            self.refresh_subscriptions()
 
 
 class Session(object):
