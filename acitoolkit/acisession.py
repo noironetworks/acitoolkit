@@ -31,6 +31,7 @@
      with the APIC.
 """
 import copy
+import collections
 import json
 import logging
 import ssl
@@ -70,6 +71,11 @@ else:
     except AttributeError:
         pass
 
+
+FALLBACK_EXCEPTIONS = (requests.exceptions.ConnectionError,
+                       requests.exceptions.Timeout,
+                       requests.exceptions.TooManyRedirects,
+                       requests.exceptions.InvalidURL)
 
 class CredentialsError(Exception):
     def __init___(self, message):
@@ -259,35 +265,44 @@ class Subscriber(threading.Thread):
         :param use_secure: Boolean indicating whether the web socket
                            should be secure.  Default is True.
         """
-        sslopt = {}
-        url = 'socket%s' % (self._apic.ws_token or self._apic.token)
-        if use_secure:
-            sslopt['cert_reqs'] = ssl.CERT_NONE
-            self._ws_url = 'wss://%s/%s' % (self._apic.ipaddr, url)
-        else:
-            self._ws_url = 'ws://%s/%s' % (self._apic.ipaddr, url)
+        max_retries = 3 * len(self._apic.urls)
+        retry = 0
+        while retry <= max_retries:
+            sslopt = {}
+            url = 'socket%s' % (self._apic.ws_token or self._apic.token)
+            if use_secure:
+                sslopt['cert_reqs'] = ssl.CERT_NONE
+                self._ws_url = 'wss://%s/%s' % (self._apic.ipaddr, url)
+            else:
+                self._ws_url = 'ws://%s/%s' % (self._apic.ipaddr, url)
 
-        kwargs = {}
-        if self._ws is not None:
-            if self._ws.connected:
-                self._ws.close()
-                self.event_handler_thread.exit()
-        cookies = self._apic._prep_x509_header('GET', '/' + url)
-        if cookies:
-            header = {"Cookie": '; '.join(['%s=%s' % (k,v) for k,v in
-                                           cookies.iteritems()])}
-            kwargs['header'] = header
-        try:
-            self._ws = create_connection(self._ws_url, sslopt=sslopt, **kwargs)
-            if not self._ws.connected:
-                logging.error('Unable to open websocket connection')
-            self.event_handler_thread = EventHandler(self)
-            self.event_handler_thread.daemon = True
-            self.event_handler_thread.start()
-        except WebSocketException:
-            logging.error('Unable to open websocket connection due to WebSocketException')
-        except socket.error:
-            logging.error('Unable to open websocket connection due to Socket Error')
+            kwargs = {}
+            if self._ws is not None:
+                if self._ws.connected:
+                    self._ws.close()
+                    self.event_handler_thread.exit()
+            cookies = self._apic._prep_x509_header('GET', '/' + url)
+            if cookies:
+                header = {"Cookie": '; '.join(['%s=%s' % (k,v) for k,v in
+                                               cookies.iteritems()])}
+                kwargs['header'] = header
+            try:
+                self._ws = create_connection(self._ws_url, sslopt=sslopt, **kwargs)
+                if not self._ws.connected:
+                    logging.error('Unable to open websocket connection')
+                    self._apic.load_ip_and_api(rotate=True)
+                    continue
+                self.event_handler_thread = EventHandler(self)
+                self.event_handler_thread.daemon = True
+                self.event_handler_thread.start()
+                # Declare victory
+                return
+            except WebSocketException:
+                logging.error('Unable to open websocket connection due to WebSocketException')
+                self._apic.load_ip_and_api(rotate=True)
+            except socket.error:
+                logging.error('Unable to open websocket connection due to Socket Error')
+                self._apic.load_ip_and_api(rotate=True)
 
     def _resubscribe(self):
         """
@@ -453,10 +468,10 @@ class Session(object):
        Session class
        This class is responsible for all communication with the APIC.
     """
-    def __init__(self, url, uid, pwd=None, cert_name=None, key=None, verify_ssl=False,
+    def __init__(self, urls, uid, pwd=None, cert_name=None, key=None, verify_ssl=False,
                  appcenter_user=False, subscription_enabled=True, proxies=None):
         """
-        :param url:  String containing the APIC URL such as ``https://1.2.3.4``
+        :param urls:  List containing the APIC URLs such as ``https://1.2.3.4``
         :param uid: String containing the username that will be used as\
         part of the  the APIC login credentials.
         :param pwd: String containing the password that will be used as\
@@ -474,14 +489,10 @@ class Session(object):
         directly to the Requests library
 
         """
-        if not isinstance(url, basestring):
-            url = str(url)
         if not isinstance(uid, basestring):
             uid = str(uid)
         if not isinstance(pwd, basestring):
             pwd = str(pwd)
-        if not isinstance(url, basestring):
-            raise CredentialsError("The URL or APIC address must be a string")
         if not isinstance(uid, basestring):
             raise CredentialsError("The user ID must be a string")
         if (pwd is None or pwd == 'None') and not cert_name and not key:
@@ -497,11 +508,8 @@ class Session(object):
                 raise CredentialsError("The key path must be a string")
         if (cert_name and not key) or (not cert_name and key):
                 raise CredentialsError("Both a certificate name and private key must be provided")
-
-        if 'https://' in url:
-            self.ipaddr = url[len('https://'):]
-        else:
-            self.ipaddr = url[len('http://'):]
+        self.urls = collections.deque(urls)
+        self.load_ip_and_api()
         self.uid = uid
         self.pwd = pwd
         self.key = key
@@ -528,8 +536,6 @@ class Session(object):
                 \nAre you sure you provided the private key? (Not the certificate)' % self.key)
         else:
             self.cert_auth = False
-        # self.api = 'http://%s:80/api/' % self.ip # 7580
-        self.api = url
         self.session = None
         self.verify_ssl = verify_ssl
         self.token = None
@@ -545,13 +551,16 @@ class Session(object):
             self.subscription_thread.daemon = True
             self.subscription_thread.start()
 
-    def __reduce__(self):
-        """
-        This will enable this class to be pickled by only saving api, uid and pwd when
-        pickling.
-        :return:
-        """
-        return self.__class__, (self.api, self.uid, self.pwd)
+    def load_ip_and_api(self, rotate=False):
+        if rotate:
+            self.urls.rotate(-1)
+            logging.info('Rotating APIC IP, using: %s' % self.urls[0])
+        url = self.urls[0]
+        if 'https://' in url:
+            self.ipaddr = url[len('https://'):]
+        else:
+            self.ipaddr = url[len('http://'):]
+        self.api = url
 
     def _prep_x509_header(self, method, url, data=None):
         """
@@ -789,6 +798,25 @@ class Session(object):
             resp = self.subscription_thread.unsubscribe(url)
             return resp
 
+    def GET(self, url, *args, **kwargs):
+        return self._do_request(self.session.get, url, *args, **kwargs)
+
+    def POST(self, url, *args, **kwargs):
+        return self._do_request(self.session.post, url, *args, **kwargs)
+
+    def _do_request(self, request, url, *args, **kwargs):
+        max_retries = 3 * len(self.urls)
+        retry = 0
+        while retry <= max_retries:
+            uri = self.api + url
+            try:
+                logging.debug("Requesting URI: %s" % url)
+                return request(uri, *args, **kwargs)
+            except FALLBACK_EXCEPTIONS as ex:
+                logging.info(('%s, falling back to a '
+                              'new address'), ex.message)
+                self.load_ip_and_api(rotate=True)
+
     def push_to_apic(self, url, data, timeout=None):
         """
         Push the object data to the APIC
@@ -806,23 +834,21 @@ class Session(object):
         if self.cert_auth and not (self.appcenter_user and self._subscription_enabled and self._logged_in):
             data = json.dumps(data, sort_keys=True)
             cookies = self._prep_x509_header('POST', url, data)
-            resp = self.session.post(post_url, data=data, verify=self.verify_ssl,
-                                     timeout=timeout, proxies=self._proxies, cookies=cookies)
+            resp = self.POST(url, data=data, verify=self.verify_ssl,
+                             timeout=timeout, proxies=self._proxies, cookies=cookies)
             if resp.status_code == 403:
                 logging.error('Certificate authentication failed. Please check all settings are correct.')
                 resp.raise_for_status()
         else:
-            resp = self.session.post(post_url, data=json.dumps(data, sort_keys=True), verify=self.verify_ssl,
-                                     timeout=timeout, proxies=self._proxies)
+            resp = self.POST(url, data=json.dumps(data, sort_keys=True), verify=self.verify_ssl,
+                             timeout=timeout, proxies=self._proxies)
             if resp.status_code == 403:
                 logging.error(resp.text)
                 logging.error('Trying to login again....')
                 resp = self._send_login()
                 self.resubscribe()
-                logging.error('Trying post again...')
-                logging.debug(post_url)
-                resp = self.session.post(post_url, data=json.dumps(data, sort_keys=True), verify=self.verify_ssl,
-                                         timeout=timeout, proxies=self._proxies)
+                resp = self.POST(url, data=json.dumps(data, sort_keys=True), verify=self.verify_ssl,
+                                 timeout=timeout, proxies=self._proxies)
         logging.debug('Response: %s %s', resp, resp.text)
         return resp
 
@@ -842,7 +868,7 @@ class Session(object):
         cookies = self._prep_x509_header('GET', url)
         if self.ws_token:
             cookies['APIC-WebSocket-Session'] = self.ws_token
-        resp = self.session.get(get_url, timeout=timeout, verify=self.verify_ssl, proxies=self._proxies, cookies=cookies)
+        resp = self.GET(url, timeout=timeout, verify=self.verify_ssl, proxies=self._proxies, cookies=cookies)
         if resp.status_code == 403:
             if self.cert_auth and not (self.appcenter_user and self._subscription_enabled):
                 logging.error('Certificate authentication failed. Please check all settings are correct.')
@@ -852,9 +878,7 @@ class Session(object):
                 logging.error('Trying to login again....')
                 resp = self._send_login()
                 self.resubscribe()
-                logging.error('Trying get again...')
-                logging.debug(get_url)
-                resp = self.session.get(get_url, timeout=timeout, verify=self.verify_ssl, proxies=self._proxies)
+                resp = self.GET(url, timeout=timeout, verify=self.verify_ssl, proxies=self._proxies)
         elif resp.status_code == 400 and 'Unable to process the query, result dataset is too big' in resp.text:
             # Response is too big so we will need to get the response in pages
             # Get the first chunk of entries
@@ -862,8 +886,8 @@ class Session(object):
             page_number = 0
             logging.debug('Getting first page')
             cookies = self._prep_x509_header('GET', url + '&page=%s&page-size=10000' % page_number)
-            resp = self.session.get(get_url + '&page=%s&page-size=10000' % page_number,
-                                    timeout=timeout, verify=self.verify_ssl, proxies=self._proxies, cookies=cookies)
+            resp = self.GET(url + '&page=%s&page-size=10000' % page_number,
+                            timeout=timeout, verify=self.verify_ssl, proxies=self._proxies, cookies=cookies)
             entries = []
             if resp.ok:
                 entries += resp.json()['imdata']
@@ -874,9 +898,9 @@ class Session(object):
                     logging.debug('Getting page %s' % page_number)
                     # Get the next chunk
                     cookies = self._prep_x509_header('GET', url + '&page=%s&page-size=10000' % page_number)
-                    resp = self.session.get(get_url + '&page=%s&page-size=10000' % page_number,
-                                            timeout=timeout, verify=self.verify_ssl,
-                                            proxies=self._proxies, cookies=cookies)
+                    resp = self.GET(url + '&page=%s&page-size=10000' % page_number,
+                                    timeout=timeout, verify=self.verify_ssl,
+                                    proxies=self._proxies, cookies=cookies)
                     if resp.ok:
                         entries += resp.json()['imdata']
                         total_count -= 10000
@@ -889,7 +913,7 @@ class Session(object):
             while retries > 0:
                 logging.debug('Retrying query')
                 cookies = self._prep_x509_header('GET', url)
-                resp = self.session.get(get_url, timeout=timeout, verify=self.verify_ssl, proxies=self._proxies, cookies=cookies)
+                resp = self.GET(url, timeout=timeout, verify=self.verify_ssl, proxies=self._proxies, cookies=cookies)
                 if resp.status_code != 200:
                     logging.debug('Retry was not successful.')
                     retries -= 1
