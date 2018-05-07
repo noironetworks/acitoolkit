@@ -40,6 +40,7 @@ import socket
 import base64
 import requests
 import sys
+import weakref
 from collections import namedtuple
 
 if sys.version_info < (3, 0, 0):
@@ -69,6 +70,14 @@ else:
         urllib3.disable_warnings()
     except AttributeError:
         pass
+
+all_locks = weakref.WeakValueDictionary()
+_master_lock = threading.Lock()
+
+
+def generate_rlock(lock_name):
+    with _master_lock:
+        return all_locks.setdefault(lock_name, threading.RLock())
 
 
 class CredentialsError(Exception):
@@ -188,64 +197,53 @@ class Subscriber(threading.Thread):
 
         :param url: URL string to issue the subscription
         """
-        try:
-            resp = self._apic.get(url)
-        except ConnectionError:
-            self._subscriptions[url] = None
-            logging.error('Could not send subscription to APIC for url %s', url)
-            resp = requests.Response()
-            resp.status_code = 598
-            resp._content = '{"error": "ConnectionError"}'
+        with generate_rlock(url):
+            try:
+                resp = self._apic.get(url)
+            except ConnectionError:
+                self._subscriptions[url] = None
+                logging.error('Could not send subscription to APIC for url %s', url)
+                resp = requests.Response()
+                resp.status_code = 598
+                resp._content = '{"error": "ConnectionError"}'
+                return resp
+            if not resp.ok:
+                self._subscriptions[url] = None
+                return resp
+            resp_data = json.loads(resp.text)
+            if 'subscriptionId' not in resp_data:
+                logging.error('Did not receive proper subscription response from APIC for url %s response: %s', url, resp_data)
+                resp = requests.Response()
+                resp.status_code = 500
+                resp._content = '{"error": "subscriptionId not in response"}'
+                return resp
+            subscription_id = resp_data['subscriptionId']
+            self._subscriptions[url] = subscription_id
+            if not only_new:
+                while len(resp_data['imdata']):
+                    event = {"totalCount": "1",
+                             "subscriptionId": [resp_data['subscriptionId']],
+                             "imdata": [resp_data["imdata"][0]]}
+                    self._event_q.put(json.dumps(event))
+                    resp_data["imdata"].remove(resp_data["imdata"][0])
             return resp
-        if not resp.ok:
-            self._subscriptions[url] = None
-            return resp
-        resp_data = json.loads(resp.text)
-        if 'subscriptionId' not in resp_data:
-            logging.error('Did not receive proper subscription response from APIC for url %s response: %s', url, resp_data)
-            resp = requests.Response()
-            resp.status_code = 500
-            resp._content = '{"error": "subscriptionId not in response"}'
-            return resp
-        subscription_id = resp_data['subscriptionId']
-        self._subscriptions[url] = subscription_id
-        if not only_new:
-            while len(resp_data['imdata']):
-                event = {"totalCount": "1",
-                         "subscriptionId": [resp_data['subscriptionId']],
-                         "imdata": [resp_data["imdata"][0]]}
-                self._event_q.put(json.dumps(event))
-                resp_data["imdata"].remove(resp_data["imdata"][0])
-        return resp
 
     def refresh_subscriptions(self):
         """
         Refresh all of the subscriptions.
         """
-        # Make a copy of the current subscriptions in case of changes
-        # while we are refreshing
-        current_subscriptions = {}
-        for subscription in self._subscriptions:
-            try:
-                current_subscriptions[subscription] = self._subscriptions[subscription]
-            except KeyError:
-                logging.warning('Subscription removed while copying')
 
         # Refresh the subscriptions
-        for subscription in current_subscriptions:
+        # dict.items() is atomic and making a copy of the key/value pairs
+        for url, sub_id in self._subscriptions.items():
             if self._ws is not None:
                 if not self._ws.connected:
                     logging.warning('Websocket not established on subscription refresh. Re-establishing websocket')
                     self._open_web_socket('https://' in self._apic.api)
-            try:
-                subscription_id = self._subscriptions[subscription]
-            except KeyError:
-                logging.warning('Subscription has been removed while trying to refresh')
+            if sub_id is None:
+                self._send_subscription(url)
                 continue
-            if subscription_id is None:
-                self._send_subscription(subscription)
-                continue
-            refresh_url = '/api/subscriptionRefresh.json?id=' + str(subscription_id)
+            refresh_url = '/api/subscriptionRefresh.json?id=' + str(sub_id)
             resp = self._apic.get(refresh_url)
             if not resp.ok:
                 logging.warning('Could not refresh subscription: %s', refresh_url)
@@ -298,7 +296,8 @@ class Subscriber(threading.Thread):
         """
         self._process_event_q()
         urls = []
-        for url in self._subscriptions:
+        # dict.keys is atomic and making a copy of the keys
+        for url in self._subscriptions.keys():
             urls.append(url)
         self._subscriptions = {}
         for url in urls:
@@ -328,15 +327,11 @@ class Subscriber(threading.Thread):
             num_subscriptions = len(event['subscriptionId'])
             for i in range(0, num_subscriptions):
                 url = None
-                for k in self._subscriptions:
-                    if self._subscriptions[k] == str(event['subscriptionId'][i]):
+                for k, v in self._subscriptions.items():
+                    if v == str(event['subscriptionId'][i]):
                         url = k
                         break
-                if url not in self._events:
-                    self._events[url] = []
-                self._events[url].append(event)
-                if num_subscriptions > 1:
-                    event = copy.deepcopy(event)
+                self._events.setdefault(url, []).append(copy.deepcopy(event))
 
     def subscribe(self, url, only_new=False):
         """
@@ -410,33 +405,34 @@ class Subscriber(threading.Thread):
 
         :param url: URL string to unsubscribe
         """
-        logging.info('Unsubscribing from url: %s', url)
-        if url not in self._subscriptions:
-            return
-        if '&subscription=yes' in url:
-            unsubscribe_url = url.split('&subscription=yes')[0] + '&subscription=no'
-        elif '?subscription=yes' in url:
-            unsubscribe_url = url.split('?subscription=yes')[0] + '?subscription=no'
-        else:
-            raise ValueError('No subscription string in URL being unsubscribed')
-        try:
-            resp = self._apic.get(unsubscribe_url)
-        except ConnectionError:
-            logging.error('Could not send unsubscribe to APIC for url %s', url)
-            resp = requests.Response()
-            resp.status_code = 598
-            resp._content = '{"error": "ConnectionError"}'
+        with generate_rlock(url):
+            logging.info('Unsubscribing from url: %s', url)
+            if url not in self._subscriptions:
+                return
+            if '&subscription=yes' in url:
+                unsubscribe_url = url.split('&subscription=yes')[0] + '&subscription=no'
+            elif '?subscription=yes' in url:
+                unsubscribe_url = url.split('?subscription=yes')[0] + '?subscription=no'
+            else:
+                raise ValueError('No subscription string in URL being unsubscribed')
+            try:
+                resp = self._apic.get(unsubscribe_url)
+            except ConnectionError:
+                logging.error('Could not send unsubscribe to APIC for url %s', url)
+                resp = requests.Response()
+                resp.status_code = 598
+                resp._content = '{"error": "ConnectionError"}'
+                return resp
+            if not resp.ok:
+                logging.warning('Could not unsubscribe from url: %s',unsubscribe_url)
+                return resp
+            # Chew up any outstanding events
+            while self.has_events(url):
+                self.get_event(url)
+            self._subscriptions.pop(url, None)
+            if not self._subscriptions:
+                self._ws.close(timeout=0)
             return resp
-        if not resp.ok:
-            logging.warning('Could not unsubscribe from url: %s',unsubscribe_url)
-            return resp
-        # Chew up any outstanding events
-        while self.has_events(url):
-            self.get_event(url)
-        self._subscriptions.pop(url, None)
-        if not self._subscriptions:
-            self._ws.close(timeout=0)
-        return resp
 
     def run(self):
         while not self._exit:
