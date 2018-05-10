@@ -234,6 +234,7 @@ class Subscriber(threading.Thread):
         """
 
         # Refresh the subscriptions
+        resub = []
         # dict.items() is atomic and making a copy of the key/value pairs
         for url, sub_id in self._subscriptions.items():
             if self._ws is not None:
@@ -244,11 +245,14 @@ class Subscriber(threading.Thread):
                 self._send_subscription(url)
                 continue
             refresh_url = '/api/subscriptionRefresh.json?id=' + str(sub_id)
+            logging.debug("Refreshing subscription: %s" % refresh_url)
             resp = self._apic.get(refresh_url)
             if not resp.ok:
                 logging.warning('Could not refresh subscription: %s', refresh_url)
                 # Try to resubscribe
-                self._resubscribe()
+                resub.append(url)
+        if resub:
+            self._resubscribe(urls=resub)
 
     def _open_web_socket(self, use_secure=True):
         """
@@ -287,7 +291,7 @@ class Subscriber(threading.Thread):
         except socket.error:
             logging.error('Unable to open websocket connection due to Socket Error')
 
-    def _resubscribe(self):
+    def _resubscribe(self, urls=None):
         """
         Reissue the subscriptions.
         Used to when the APIC login timeout occurs and a new subscription
@@ -295,11 +299,12 @@ class Subscriber(threading.Thread):
         directly by end user applications.
         """
         self._process_event_q()
-        urls = []
+        urls = urls or []
         # dict.keys is atomic and making a copy of the keys
-        for url in self._subscriptions.keys():
-            urls.append(url)
-        self._subscriptions = {}
+        if not urls:
+            for url in self._subscriptions.keys():
+                urls.append(url)
+            self._subscriptions = {}
         for url in urls:
             self.subscribe(url, only_new=True)
 
