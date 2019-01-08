@@ -802,7 +802,9 @@ class Session(object):
                   response.ok is True if request is sent successfully.
         """
         post_url = self.api + url
-        logging.debug('Posting url: %s data: %s', post_url, data)
+        # Don't leak credentials
+        if 'aaaUser' not in data:
+            logging.debug('Posting url: %s data: %s', post_url, data)
 
         if self.cert_auth and not (self.appcenter_user and self._subscription_enabled and self._logged_in):
             data = json.dumps(data, sort_keys=True)
