@@ -1423,7 +1423,7 @@ class EPG(CommonEPG):
             vmm_domains += self._base_epg.get_all_attached(VmmDomain)
         for vmm in vmm_domains:
             text = {'fvRsDomAtt': {'attributes': {'tDn': vmm._get_path(),
-                                                  'resImedcy': 'immediate'}}}
+                                                  'resImedcy': 'lazy'}}}
 
             if self._deployment_immediacy:
                 text['fvRsDomAtt']['attributes']['instrImedcy'] = self._deployment_immediacy
