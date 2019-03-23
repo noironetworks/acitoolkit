@@ -137,6 +137,7 @@ class Login(threading.Thread):
             except ConnectionError:
                 logging.error('Could not relogin to APIC due to ConnectionError')
                 self._apic.login_error = True
+                self._exit = True
 
 
 class EventHandler(threading.Thread):
@@ -677,14 +678,14 @@ class Session(object):
         logging.info('Initializing connection to the APIC')
         try:
             resp = self._send_login(timeout)
+            if (self.appcenter_user and self._subscription_enabled) or not self.cert_auth:
+                self.login_thread.daemon = True
+                self.login_thread.start()
         except ConnectionError as e:
             logging.error('Could not relogin to APIC due to ConnectionError: %s', e)
             resp = requests.Response()
             resp.status_code = 404
             resp._content = '{"error": "Could not relogin to APIC due to ConnectionError"}'
-        if (self.appcenter_user and self._subscription_enabled) or not self.cert_auth:
-            self.login_thread.daemon = True
-            self.login_thread.start()
         return resp
 
     def logged_in(self):
