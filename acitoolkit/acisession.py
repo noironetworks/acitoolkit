@@ -30,18 +30,20 @@
 """  This module contains the Session class that controls communication
      with the APIC.
 """
+import base64
 import copy
 import json
 import logging
+import requests
+import six
+import socket
 import ssl
+import sys
 import threading
 import time
-import socket
-import base64
-import requests
-import sys
 import weakref
 from collections import namedtuple
+
 
 if sys.version_info < (3, 0, 0):
     from urllib import unquote
@@ -476,26 +478,26 @@ class Session(object):
         directly to the Requests library
 
         """
-        if not isinstance(url, basestring):
+        if not isinstance(url, six.string_types):
             url = str(url)
-        if not isinstance(uid, basestring):
+        if not isinstance(uid, six.string_types):
             uid = str(uid)
-        if not isinstance(pwd, basestring):
+        if not isinstance(pwd, six.string_types):
             pwd = str(pwd)
-        if not isinstance(url, basestring):
+        if not isinstance(url, six.string_types):
             raise CredentialsError("The URL or APIC address must be a string")
-        if not isinstance(uid, basestring):
+        if not isinstance(uid, six.string_types):
             raise CredentialsError("The user ID must be a string")
         if (pwd is None or pwd == 'None') and not cert_name and not key:
             raise CredentialsError("An authentication method must be provided")
         if pwd:
-            if not isinstance(pwd, basestring):
+            if not isinstance(pwd, six.string_types):
                 raise CredentialsError("The password must be a string")
         if cert_name:
-            if not isinstance(cert_name, basestring):
+            if not isinstance(cert_name, six.string_types):
                 raise CredentialsError("The certificate name must be a string")
         if key:
-            if not isinstance(key, basestring):
+            if not isinstance(key, six.string_types):
                 raise CredentialsError("The key path must be a string")
         if (cert_name and not key) or (not cert_name and key):
                 raise CredentialsError("Both a certificate name and private key must be provided")
