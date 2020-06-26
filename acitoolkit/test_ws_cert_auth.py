@@ -18,5 +18,5 @@ session.subscribe(url_subs)
 while True:
     while session.has_events(url_subs):
         event = session.get_event(url_subs)['imdata'][0]
-        print event
+        print(event)
     time.sleep(1)
