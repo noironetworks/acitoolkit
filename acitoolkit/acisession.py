@@ -335,7 +335,7 @@ class Subscriber(threading.Thread):
             num_subscriptions = len(event['subscriptionId'])
             for i in range(0, num_subscriptions):
                 url = None
-                for k, v in self._subscriptions.items():
+                for k, v in list(self._subscriptions.items()):
                     if v == str(event['subscriptionId'][i]):
                         url = k
                         break
