@@ -20,7 +20,7 @@ setup(
     url=about["__uri__"],
     license=about["__license__"],
     install_requires=["requests",
-                      "websocket-client>0.33.0",
+                      "websocket>0.33.0",
                       "jsonschema",
                       "six"],
     tests_requires=["mock"],
