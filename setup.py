@@ -22,6 +22,7 @@ setup(
     install_requires=["requests",
                       "websocket-client>0.33.0",
                       "jsonschema",
+                      "pyrsistent<=0.16.0;python_version=='2.7'",
                       "six"],
     tests_requires=["mock"],
     description="This library allows basic Cisco ACI APIC configuration.",
