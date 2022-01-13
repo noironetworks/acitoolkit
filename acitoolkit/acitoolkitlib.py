@@ -69,7 +69,7 @@ class Credentials(object):
              - environmental variables
              - credentials.py file
             """
-            if 'APIC_' + key.upper() in os.environ.keys():
+            if 'APIC_' + key.upper() in list(os.environ.keys()):
                 return os.environ['APIC_' + key.upper()]
             else:
                 try:
@@ -164,9 +164,9 @@ class Credentials(object):
         Use raw_input or input based on the Python version.
         """
         try:
-            resp = raw_input(prompt)
-        except NameError:
             resp = input(prompt)
+        except NameError:
+            resp = eval(input(prompt))
         return resp
 
     @staticmethod

@@ -71,9 +71,9 @@ class Faults(BaseACIObject):
         url = '/api/class/{}.json?subscription=yes'.format(self._get_apic_classes()[0])
         if fault_filter is not None:
             extension = "&query-target-filter="
-            if len(fault_filter.keys()) > 1:
+            if len(list(fault_filter.keys())) > 1:
                 extension += 'and('
-                for key in fault_filter.keys():
+                for key in list(fault_filter.keys()):
                     if len(fault_filter[key]) > 1:
                         abc = "or("
                         abc += ", ".join([",".join(["eq(faultInfo." + key, "\"" + str(value) + "\")"])
@@ -88,7 +88,7 @@ class Faults(BaseACIObject):
                         extension += ",".join(["eq(faultInfo." + key, "\"" + str(fault_filter[key][0]) + "\")"])
                 extension += ")"
             else:
-                for key in fault_filter.keys():
+                for key in list(fault_filter.keys()):
                     if len(fault_filter[key]) > 1:
                         abc = "or("
                         abc += ", ".join([",".join(["eq(faultInfo." + key, "\"" + str(value) + "\")"])
@@ -143,7 +143,7 @@ class Faults(BaseACIObject):
                      format with domain, types, severity
         :returns: fault obj if it satisfies fault_filter
         """
-        for key in fault_filter.keys():
+        for key in list(fault_filter.keys()):
             for value in fault_filter[key]:
                 if getattr(self, key) == value:
                     return self
@@ -257,5 +257,5 @@ class Faults(BaseACIObject):
         try:
             validate(fault_filter, schema)
         except ValidationError as e:
-            print('JSON configuration validation failed: %s', e.message)
+            print(('JSON configuration validation failed: %s', e.message))
             os._exit(1)

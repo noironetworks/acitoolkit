@@ -75,7 +75,7 @@ class CommonConcreteObject(BaseACIPhysObject):
                 results[attr] = str(self.attr[attr])
             else:
                 if self.attr[attr] is not None:
-                    print('Wrong Instance Type %s %s found %s' % (attr, self.__class__.__name__, type(self.attr[attr])))
+                    print(('Wrong Instance Type %s %s found %s' % (attr, self.__class__.__name__, type(self.attr[attr]))))
         return results
 
     @property
@@ -827,7 +827,7 @@ class ConcreteVpcIf(CommonConcreteObject):
         for v_range in vlan_ranges:
             if '-' in v_range:
                 [v_low, v_hi] = v_range.split('-')
-                vlan_list.extend(range(int(v_low), int(v_hi) + 1))
+                vlan_list.extend(list(range(int(v_low), int(v_hi) + 1)))
             else:
                 vlan_list.append(v_range)
         return vlan_list
@@ -2120,7 +2120,7 @@ class ConcreteEp(CommonConcreteObject):
                             end_point.attr['ip'] = ip_add
                         rem_ep.append((ip_add, ip_ctx, ip_bd))
                     else:
-                        print ('unexpected context or bd mismatch', ip_add, ip_ctx, ip_bd)
+                        print(('unexpected context or bd mismatch', ip_add, ip_ctx, ip_bd))
         result.extend(new_ep_list)
         final_result = []
         for ept in result:

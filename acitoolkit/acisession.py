@@ -239,7 +239,7 @@ class Subscriber(threading.Thread):
         # Refresh the subscriptions
         resub = []
         # dict.items() is atomic and making a copy of the key/value pairs
-        for url, sub_id in self._subscriptions.items():
+        for url, sub_id in list(self._subscriptions.items()):
             if self._ws is not None:
                 if not self._ws.connected:
                     logging.warning('Websocket not established on subscription refresh. Re-establishing websocket')
@@ -280,7 +280,7 @@ class Subscriber(threading.Thread):
         cookies = self._apic._prep_x509_header('GET', '/' + url)
         if cookies:
             header = {"Cookie": '; '.join(['%s=%s' % (k,v) for k,v in
-                                           cookies.iteritems()])}
+                                           list(cookies.items())])}
             kwargs['header'] = header
         try:
             self._ws = create_connection(self._ws_url, sslopt=sslopt, **kwargs)
@@ -305,7 +305,7 @@ class Subscriber(threading.Thread):
         urls = urls or []
         # dict.keys is atomic and making a copy of the keys
         if not urls:
-            for url in self._subscriptions.keys():
+            for url in list(self._subscriptions.keys()):
                 urls.append(url)
             self._subscriptions = {}
         for url in urls:
@@ -605,7 +605,8 @@ class Session(object):
         if data:
             payload += data
 
-        signature = base64.b64encode(sign(self._x509Key, payload, 'sha256'))
+        signature = base64.b64encode(sign(self._x509Key, payload, 'sha256').
+                                     decode('utf-8'))
         cookie = {'APIC-Request-Signature': signature,
                   'APIC-Certificate-Algorithm': 'v1.0',
                   'APIC-Certificate-Fingerprint': 'fingerprint',
