@@ -165,7 +165,7 @@ class FakeSession(Session):
                 logging.error('Unknown class %s', cl)
                 return []
             return [cl_obj for _, cl_obj in lst]
-        for _, lst in self._classes.iteritems():
+        for _, lst in list(self._classes.items()):
             if target and query_target != 'self':
                 lst = self._classes[target]
             for tup in lst:
@@ -197,7 +197,7 @@ class FakeSession(Session):
         if rsp_subtree != 'full':
             resp = []
             for node in db:
-                node_cl, _ = next(node.iteritems())
+                node_cl, _ = next(iter(node.items()))
                 # make a deep copy to avoid deleting other nodes
                 node_cl_copy = deepcopy(node[node_cl])
                 ret = {}
@@ -222,7 +222,7 @@ class FakeSession(Session):
         :return: None
         """
         for child in db:
-            _, contents = next(child.iteritems())
+            _, contents = next(iter(child.items()))
             if contents.get('children'):
                 del contents['children']
 
@@ -282,7 +282,7 @@ class FakeSession(Session):
         :return: None
         """
         for child in children:
-            node_cl, contents = next(child.iteritems())
+            node_cl, contents = next(iter(child.items()))
             attributes = contents['attributes']
             if not attributes.get('dn'):
                 rn = attributes['rn']

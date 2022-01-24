@@ -2603,7 +2603,7 @@ class Interface(BaseInterface):
                 resp = session.push_to_apic(self.get_url()[i],
                                             self.get_json()[i])
                 if not resp.ok:
-                    print('%% Error: Could not push configuration to APIC for url:', self.get_url()[i])
+                    print(('%% Error: Could not push configuration to APIC for url:', self.get_url()[i]))
                     return resp
         return resp
 
@@ -3142,7 +3142,7 @@ class WorkingData(object):
         """
         for item in self.rawjson:
             for apic_class in item:
-                if apic_class != u'error':
+                if apic_class != 'error':
                     self.by_dn[item[apic_class]['attributes']['dn']] = item
                     if apic_class not in self.by_class:
                         self.by_class[apic_class] = []

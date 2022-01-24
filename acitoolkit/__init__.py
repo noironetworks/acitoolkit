@@ -63,6 +63,6 @@ from .aciphysobject import (  # noqa
 import inspect as _inspect
 
 __all__ = _about_exports + sorted(
-    name for name, obj in locals().items()
+    name for name, obj in list(locals().items())
     if not (name.startswith('_') or _inspect.ismodule(obj))
 )
