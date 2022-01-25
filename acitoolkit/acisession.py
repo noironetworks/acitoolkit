@@ -605,8 +605,8 @@ class Session(object):
         if data:
             payload += data
 
-        signature = base64.b64encode(sign(self._x509Key, payload, 'sha256').
-                                     decode('utf-8'))
+        signature = base64.b64encode(
+                sign(self._x509Key, payload, 'sha256')).decode('utf-8')
         cookie = {'APIC-Request-Signature': signature,
                   'APIC-Certificate-Algorithm': 'v1.0',
                   'APIC-Certificate-Fingerprint': 'fingerprint',
