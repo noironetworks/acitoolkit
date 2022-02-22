@@ -182,7 +182,7 @@ class Subscriber(threading.Thread):
         self._subscriptions = {}
         self._ws = None
         self._ws_url = None
-        self._refresh_time = 30
+        self._refresh_time = 450
         self._event_q = queue.Queue()
         self._events = {}
         self._exit = False
@@ -231,18 +231,22 @@ class Subscriber(threading.Thread):
                     resp_data["imdata"].remove(resp_data["imdata"][0])
             return resp
 
-    def refresh_subscriptions(self):
+    def refresh_subscriptions(self, urls=None):
         """
         Refresh all of the subscriptions.
         """
 
         # Refresh the subscriptions
         resub = []
+        subscriptions = [(url, self._subscriptions[url])
+                         for url in urls] if urls else (
+                                 self._subscriptions.items())
         # dict.items() is atomic and making a copy of the key/value pairs
-        for url, sub_id in list(self._subscriptions.items()):
+        for url, sub_id in list(subscriptions):
             if self._ws is not None:
                 if not self._ws.connected:
-                    logging.warning('Websocket not established on subscription refresh. Re-establishing websocket')
+                    logging.warning('Websocket not established on subscription'
+                                    'refresh. Re-establishing websocket')
                     self._open_web_socket('https://' in self._apic.api)
             if sub_id is None:
                 self._send_subscription(url)
@@ -446,10 +450,6 @@ class Subscriber(threading.Thread):
         while not self._exit:
             # Sleep for some interval and send subscription list
             time.sleep(self._refresh_time)
-            try:
-                self.refresh_subscriptions()
-            except ConnectionError:
-                logging.error('Could not refresh subscriptions due to ConnectionError')
 
 
 class Session(object):
@@ -711,6 +711,9 @@ class Session(object):
         ret_data = json.loads(resp.text)['imdata'][0]
         self.token = str(ret_data['aaaLogin']['attributes']['token'])
         return resp
+
+    def refresh_subscriptions(self, urls=None):
+        self.subscription_thread.refresh_subscriptions(urls=urls)
 
     def close(self):
         """
