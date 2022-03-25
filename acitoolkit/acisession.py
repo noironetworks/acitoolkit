@@ -307,11 +307,16 @@ class Subscriber(threading.Thread):
         """
         self._process_event_q()
         urls = urls or []
+        subscriptions = list(self._subscriptions.keys())
         # dict.keys is atomic and making a copy of the keys
         if not urls:
-            for url in list(self._subscriptions.keys()):
+            for url in subscriptions:
                 urls.append(url)
             self._subscriptions = {}
+        else:
+            for url in urls:
+                if url in subscriptions:
+                    del(self._subscriptions[url])
         for url in urls:
             self.subscribe(url, only_new=True)
 
