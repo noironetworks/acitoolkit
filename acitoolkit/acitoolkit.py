@@ -30,7 +30,10 @@
 """  Main ACI Toolkit module
      This is the main module that comprises the ACI Toolkit.
 """
-from collections import Sequence
+try:
+    from collections.abc import Sequence
+except ImportError:
+    from collections import Sequence
 import logging
 from operator import attrgetter, itemgetter
 import re
@@ -5109,7 +5112,7 @@ class Endpoint(BaseACIObject):
             self.encap = str(attributes.get('encap'))
         if 'lcC' in attributes:
             life_cycle = str(attributes.get('lcC'))
-        if life_cycle is not '':
+        if life_cycle != '':
             self.life_cycle = life_cycle
         if 'type' in attributes:
             self.type = str(attributes.get('type'))
