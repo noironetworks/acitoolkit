@@ -1102,7 +1102,7 @@ class ConcreteSVI(CommonConcreteObject):
         self.attr['vlan_id'] = str(attr['vlanId'])
         self.attr['vlan_type'] = str(attr['vlanT'])
         self.attr['dn'] = str(attr['dn'])
-        if self.attr['name'] is '':
+        if self.attr['name'] == '':
             self.name = self.attr['id']
         else:
             self.name = self.attr['name']
