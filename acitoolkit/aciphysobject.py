@@ -3417,10 +3417,13 @@ class PhysicalModel(BaseACIObject):
         :return:
         """
         if session:
-            assert isinstance(session, Session)
+            if not isinstance(session, Session):
+                raise TypeError("The session object must "
+                                "be an instance of the Session class.")
 
         if parent:
-            assert isinstance(parent, Fabric)
+            if not isinstance(parent, Fabric):
+                raise TypeError("parent must be an instance of Fabric class")
 
         super(PhysicalModel, self).__init__(name='', parent=parent)
         self.dn = 'topology'

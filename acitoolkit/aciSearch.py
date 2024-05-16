@@ -75,9 +75,14 @@ class Searchable(object):
         if isinstance(attr, unicode):
             attr = str(attr)
 
-        assert relation in ['primary', 'secondary']
-        assert isinstance(value, str) or (value is None)
-        assert isinstance(attr, str)
+        if relation not in ['primary', 'secondary']:
+            raise ValueError("relation must be 'primary' or 'secondary'")
+
+        if not isinstance(value, str) or (value is not None):
+            raise TypeError("value must be a string or None")
+
+        if not isinstance(attr, str):
+            raise TypeError("attr must be a string")
 
         self.terms.add((attr, value, relation))
         self.attr.add(attr)

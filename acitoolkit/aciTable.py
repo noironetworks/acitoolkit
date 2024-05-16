@@ -90,7 +90,9 @@ class Table(object):
         self.missingval = missingval
         self.title = title
         self.columns = columns
-        assert(table_orientation in ['horizontal', 'vertical'])
+        if table_orientation not in ['horizontal', 'vertical']:
+            raise ValueError("table_orientation must be "
+                             "'horizontal' or 'vertical'")
         self.table_orientation = table_orientation
 
     def get_text(self, title=None, tablefmt=None, floatfmt=None, numalign=None, stralign=None,
@@ -130,9 +132,11 @@ class Table(object):
         if table_orientation == 'vertical':
 
             if self.headers:
-                assert len(self.data[0]) == len(self.headers),\
-                    'Headers and Data have different lenghts - {0} and {1} respectively'\
-                    .format(len(self.headers), len(self.data[0]))
+                if len(self.data[0]) != len(self.headers):
+                    raise ValueError("Headers and Data have different lengths "
+                                     "- {0} and {1} respectively"
+                                     .format(len(self.headers),
+                                      len(self.data[0])))
                 rows = [self.headers] + self.data
             else:
                 rows = self.data

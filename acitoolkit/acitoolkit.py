@@ -766,7 +766,9 @@ class AttributeCriterion(BaseACIObject):
         :param x: String containing the match property. Possible values are 'any' or 'all'
         :return: None
         """
-        assert x in ['any', 'all']
+        if x not in ['any', 'all']:
+            raise ValueError("x must be 'any' or 'all'")
+
         self._match = x
 
     @classmethod
@@ -1751,7 +1753,8 @@ class OutsideL3(BaseACIObject):
         :param context: Instance of Context class to assign to this\
                         OutsideL3.
         """
-        assert isinstance(context, Context)
+        if not isinstance(context, Context):
+            raise TypeError("context must be an instance of Context")
         if self.has_context():
             self.remove_context()
         self.context_name = context.name
@@ -1949,7 +1952,8 @@ class OutsideL2(BaseACIObject):
 
         :param bd: Instance of BridgeDomain class to assign to this OutsideL2.
         """
-        assert isinstance(bd, BridgeDomain)
+        if not isinstance(bd, BridgeDomain):
+            raise TypeError("bd must be an instance of BridgeDomain")
         if self.has_bd():
             self.remove_bd()
         self.bd_name = bd.name
@@ -2127,7 +2131,8 @@ class L3Interface(BaseACIObject):
         :param context: Instance of Context class to assign to this\
                         L3Interface.
         """
-        assert isinstance(context, Context)
+        if not isinstance(context, Context):
+            raise TypeError("context should be an instance of Context class")
         if self.has_context():
             self.remove_context()
         self._add_relation(context)
@@ -2729,7 +2734,8 @@ class BridgeDomain(BaseACIObject):
 
         :param context: Context to assign this BridgeDomain
         """
-        assert isinstance(context, Context)
+        if not isinstance(context, Context):
+            raise TypeError("context should be an instance of Context class")
         self._add_relation(context)
 
     def remove_context(self):
@@ -3742,7 +3748,10 @@ class BaseContract(BaseACIObject):
                           Default is 'bidirectional-only'
         :return: List of FilterEntry instances
         """
-        assert direction in ['bidirectional-only', 'all', 'input-only', 'output-only']
+        if direction not in ['bidirectional-only', 'all',
+                             'input-only', 'output-only']:
+            raise ValueError("direction must be one of 'bidirectional-only', "
+                             "'all', 'input-only', 'output-only'")
         entries = []
         if direction == 'bidirectional-only' or direction == 'all':
             for entry in self.get_children(only_class=FilterEntry):
@@ -3896,7 +3905,8 @@ class Contract(BaseContract):
                         or that the providing/consuming relationship was marked as deleted
         :return: List of EPG instances
         """
-        assert relation_type in ['provided', 'consumed']
+        if relation_type not in ['provided', 'consumed']:
+            raise ValueError("relation_type must be 'provided' or 'consumed'")
         resp = []
         if deleted:
             status = 'detached'
@@ -4689,8 +4699,7 @@ class BaseTerminal(BaseACIObject):
 
         :returns: String containing APIC class name for this type of terminal.
         """
-        assert NotImplemented('This method needs to be implemented')
-
+        raise NotImplementedError('This method needs to be implemented')
 
 class InputTerminal(BaseTerminal):
     """
@@ -5359,8 +5368,10 @@ class Endpoint(BaseACIObject):
         endpoints = []
         if len(data) == 0:
             return endpoints
-        assert len(data) == 1
-        assert 'fvAEPg' in data[0]
+        if len(data) != 1:
+            raise ValueError("data should contain exactly one item")
+        if 'fvAEPg' not in data[0]:
+            raise ValueError("'fvAEPg' not found in the first item of data")
         if 'children' not in data[0]['fvAEPg']:
             return endpoints
         endpoints_data = data[0]['fvAEPg']['children']
@@ -7229,7 +7240,8 @@ class LogicalModel(BaseACIObject):
         :return:
         """
         if session:
-            assert isinstance(session, Session)
+            if not isinstance(session, Session):
+                raise TypeError("session must be an instance of Session")
 
         # if parent:
         #     assert isinstance(parent, Fabric)

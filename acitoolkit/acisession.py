@@ -471,7 +471,8 @@ class Session(object):
             raise CredentialsError("The URL or APIC address must be a string")
         if not isinstance(uid, str):
             raise CredentialsError("The user ID must be a string")
-        if (pwd is None or pwd == 'None') and not cert_name and not key:
+        if ((pwd is None or pwd == 'None')  # nosec
+             and not cert_name and not key:
             raise CredentialsError("An authentication method must be provided")
         if pwd:
             if not isinstance(pwd, str):
