@@ -31,6 +31,7 @@
 Collection of utility classes to make getting credentials and configuration easier.
 """
 import argparse
+import ast
 import getpass
 import os
 import acitoolkit
@@ -166,7 +167,7 @@ class Credentials(object):
         try:
             resp = input(prompt)
         except NameError:
-            resp = eval(input(prompt))
+            resp = ast.literal_eval(input(prompt))
         return resp
 
     @staticmethod
