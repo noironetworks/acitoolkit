@@ -1,0 +1,46 @@
+pipeline {
+    agent {
+        label 'noiro-build-101.cisco.com'
+    }
+    environment {
+        TMP_RPM_DIR = '.tmp-rpm'
+    }
+    stages {
+        stage('Clone Repository') {
+            steps {
+                script {
+                    sh """
+                        git clone https://github.com/noironetworks/3rdparty-rpm.git ${TMP_RPM_DIR}
+                    """
+                }
+            }
+        }
+        stage('Move Directory') {
+            steps {
+                script {
+                    sh """
+                        mv ${TMP_RPM_DIR}/acitoolkit/rpm .
+                    """
+                }
+            }
+        }
+        stage('Clean Up') {
+            steps {
+                script {
+                    sh """
+                        rm -rf ${TMP_RPM_DIR}
+                    """
+                }
+            }
+        }
+        stage('Build RPM') {
+            steps {
+                script {
+                    sh """
+                        BUILD_DIR=$WORKSPACE/rpmbuild RELEASE=$BUILD_NUMBER ./rpm/build-rpm.sh
+                    """
+                }
+            }
+        }
+    }
+}
