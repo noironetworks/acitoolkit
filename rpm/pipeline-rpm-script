@@ -2,6 +2,10 @@ pipeline {
     agent {
         label 'noiro-build-101.cisco.com'
     }
+    options {
+        timestamps()
+        disableConcurrentBuilds()
+    }
     environment {
         TMP_RPM_DIR = '.tmp-rpm'
         ARTIFACTORY_USER = 'noiro.gen'
@@ -48,7 +52,7 @@ pipeline {
                         def signUser2 = params.SIGNUSER2 ?: 'empty'
                         // Execute sign-rpm.sh with Vault credentials passed as parameters
                         sh """
-                            ./rpm/sign-rpm.sh $WORKSPACE/rpmbuild ${signUser1} ${signUser2} ${params.ReleaseBuild}
+                            ./rpm/sign-rpm.sh $WORKSPACE/rpmbuild git  ${signUser2} ${params.ReleaseBuild}
                         """
                     }
                 }
@@ -68,6 +72,11 @@ pipeline {
                     }
                 }
             }
+        }
+    }
+    post {
+        always {
+            cleanWs(deleteDirs: true)
         }
     }
 }
