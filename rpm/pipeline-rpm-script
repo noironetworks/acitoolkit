@@ -52,7 +52,7 @@ pipeline {
                         def signUser2 = params.SIGNUSER2 ?: 'empty'
                         // Execute sign-rpm.sh with Vault credentials passed as parameters
                         sh """
-                            ./rpm/sign-rpm.sh $WORKSPACE/rpmbuild git  ${signUser2} ${params.ReleaseBuild}
+                            ./rpm/sign-rpm.sh $WORKSPACE/rpmbuild ${signUser1}  ${signUser2} ${params.ReleaseBuild}
                         """
                     }
                 }
