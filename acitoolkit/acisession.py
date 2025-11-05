@@ -475,8 +475,12 @@ class Session(object):
         :param key: String containing the private key file name that will be used\
         as part of the  the APIC certificate authentication credentials.
         :param verify_ssl:  Used only for SSL connections with the APIC.\
-        Indicates whether SSL certificates must be verified.  Possible\
-        values are True and False with the default being False.
+        Indicates whether SSL certificates must be verified.
+        values are:\
+            - True: Verify using system CA bundle\
+            - False: Do not verify SSL certificates (insecure, default)\
+            - str: Path to custom CA certificate bundle file\
+                   (e.g., '/etc/ssl/certs/ca-bundle.crt')\
         :param appcenter_user:  Set True when using certificate authentication from\
         the context of an APIC appcenter app
         :param proxies: Optional dictionary containing the proxies passed\
