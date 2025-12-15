@@ -426,12 +426,15 @@ class Subscriber(threading.Thread):
             logging.info('Unsubscribing from url: %s', url)
             if url not in self._subscriptions:
                 return
-            if '&subscription=yes' in url:
-                unsubscribe_url = url.split('&subscription=yes')[0] + '&subscription=no'
-            elif '?subscription=yes' in url:
-                unsubscribe_url = url.split('?subscription=yes')[0] + '?subscription=no'
-            else:
-                raise ValueError('No subscription string in URL being unsubscribed')
+            sub_id = self._subscriptions[url]
+            if sub_id is None:
+                logging.warning('No subscriptionId stored for url: %s', url)
+                resp = requests.Response()
+                resp.status_code = 400
+                resp._content = '{"error": "No subscriptionId for url"}'
+                return resp
+            unsubscribe_url = '/api/subscriptionStop.json?id=' + str(sub_id)
+            logging.info('Unsubscribe url: %s', unsubscribe_url)
             try:
                 resp = self._apic.get(unsubscribe_url)
             except ConnectionError:
